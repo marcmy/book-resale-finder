@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "book-resale-finder"
+version = "1.0.0"
+description = "Desktop eBay price finder for book ASIN/ISBN lists."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "marcmy" }]
+dependencies = [
+  "PySide6>=6.8,<7",
+  "httpx>=0.27,<1",
+  "openpyxl>=3.1,<4",
+  "PyYAML>=6,<7",
+  "keyring>=25,<27",
+]
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.10,<7"]
+test = ["pytest>=8,<10"]
+
+[project.gui-scripts]
+book-resale-finder = "book_resale_finder.app:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["book_resale_finder*"]
+
+[tool.setuptools.package-data]
+book_resale_finder = ["resources/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
