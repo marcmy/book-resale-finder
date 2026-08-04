@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "book-resale-finder"
-version = "1.0.0"
+version = "1.0.1"
 description = "Desktop eBay price finder for book ASIN/ISBN lists."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "marcmy" }]
 dependencies = [
-  "PySide6>=6.8,<7",
+  "PySide6==6.8.3",
   "httpx>=0.27,<1",
   "openpyxl>=3.1,<4",
   "PyYAML>=6,<7",
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-build = ["pyinstaller>=6.10,<7"]
+build = ["pyinstaller==6.21.0"]
 test = ["pytest>=8,<10"]
 
 [project.gui-scripts]
