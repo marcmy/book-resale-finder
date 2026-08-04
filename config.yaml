@@ -1,0 +1,23 @@
+# Book Resale Finder configuration.
+# Paths are resolved relative to BookResaleFinder.exe.
+input_csv: masterlist.csv
+output_dir: output
+output_prefix: book_resale_results
+
+marketplace_id: EBAY_US
+conditions:
+  - NEW
+  - LIKE_NEW
+  - VERY_GOOD
+  - GOOD
+buying_options:
+  - FIXED_PRICE
+  - AUCTION
+
+max_workers: 10
+rate_limit_per_second: 5
+price_item_limit: 10
+shipping_item_limit: 3
+fallback_to_search: true
+request_timeout_seconds: 30
+max_retries: 3
