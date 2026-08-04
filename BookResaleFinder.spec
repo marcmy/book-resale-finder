@@ -9,7 +9,7 @@ a = Analysis(
     pathex=[str(project)],
     binaries=[],
     datas=[
-        (str(project / "book_resale_finder" / "resources" / "icon.ico"), "book_resale_finder/resources"),
+        (str(icon), "book_resale_finder/resources"),
     ],
     hiddenimports=[
         "keyring.backends.Windows",
@@ -24,19 +24,19 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# Use an onedir build. Qt/PySide applications are substantially more reliable
+# this way because DLLs and platform plugins do not have to be unpacked into a
+# temporary folder every time the program starts.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="BookResaleFinder",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -44,4 +44,14 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(icon),
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="BookResaleFinder",
 )
