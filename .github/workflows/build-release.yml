@@ -30,7 +30,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
           cache: pip
 
       - name: Install dependencies
@@ -45,6 +45,34 @@ jobs:
       - name: Build executable
         run: python -m PyInstaller --noconfirm --clean BookResaleFinder.spec
 
+      - name: Smoke-test frozen executable
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD 'dist/BookResaleFinder/BookResaleFinder.exe'
+          $env:BRF_SMOKE_TEST = '1'
+          $process = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $finished = $process.WaitForExit(30000)
+          Remove-Item Env:BRF_SMOKE_TEST -ErrorAction SilentlyContinue
+
+          if (-not $finished) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw 'Frozen executable did not finish its startup smoke test within 30 seconds.'
+          }
+
+          if ($process.ExitCode -ne 0) {
+            $logs = @(
+              (Join-Path $env:LOCALAPPDATA 'Book Resale Finder/startup.log'),
+              (Join-Path (Split-Path $exe) 'startup.log')
+            )
+            foreach ($log in $logs) {
+              if (Test-Path $log) {
+                Write-Host "---- $log ----"
+                Get-Content $log
+              }
+            }
+            throw "Frozen executable exited with code $($process.ExitCode)."
+          }
+
       - name: Read application version
         id: version
         shell: pwsh
@@ -56,19 +84,39 @@ jobs:
       - name: Assemble portable package
         shell: pwsh
         run: |
-          $package = Join-Path $PWD 'package'
-          Remove-Item $package -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item $package -ItemType Directory | Out-Null
-          Copy-Item 'dist/BookResaleFinder.exe' $package
-          Copy-Item 'config.yaml' $package
-          Copy-Item 'masterlist.csv' $package
-          Copy-Item 'README.md' $package
-          New-Item (Join-Path $package 'output') -ItemType Directory | Out-Null
+          $version = '${{ steps.version.outputs.version }}'
+          $packageRoot = Join-Path $PWD "package/BookResaleFinder-$version"
+          Remove-Item (Split-Path $packageRoot) -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item $packageRoot -ItemType Directory -Force | Out-Null
 
-          $zip = "BookResaleFinder-${{ steps.version.outputs.version }}-Windows-x64.zip"
-          Compress-Archive -Path "$package/*" -DestinationPath $zip -Force
+          Copy-Item 'dist/BookResaleFinder/*' $packageRoot -Recurse -Force
+          Copy-Item 'config.yaml' $packageRoot
+          Copy-Item 'masterlist.csv' $packageRoot
+          Copy-Item 'README.md' $packageRoot
+          New-Item (Join-Path $packageRoot 'output') -ItemType Directory -Force | Out-Null
+
+          $zip = "BookResaleFinder-$version-Windows-x64.zip"
+          Compress-Archive -Path $packageRoot -DestinationPath $zip -Force
           (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() + "  " + $zip |
             Set-Content "$zip.sha256" -Encoding ascii
+
+      - name: Smoke-test packaged executable
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $exe = Join-Path $PWD "package/BookResaleFinder-$version/BookResaleFinder.exe"
+          $env:BRF_SMOKE_TEST = '1'
+          $process = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $finished = $process.WaitForExit(30000)
+          Remove-Item Env:BRF_SMOKE_TEST -ErrorAction SilentlyContinue
+
+          if (-not $finished) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw 'Packaged executable did not finish its startup smoke test within 30 seconds.'
+          }
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged executable exited with code $($process.ExitCode)."
+          }
 
       - name: Upload Windows build artifact
         uses: actions/upload-artifact@v4
