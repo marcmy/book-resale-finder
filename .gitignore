@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+build/
+dist/
+*.spec.bak
+output/*.xlsx
+.env
+
+# Generated from resources/icon.svg during builds.
+book_resale_finder/resources/icon.ico
+book_resale_finder/resources/icon.png
