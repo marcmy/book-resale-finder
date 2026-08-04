@@ -15,7 +15,7 @@ A from-scratch desktop rewrite of the former `isbn_lookup.exe` utility. It reads
 
 ## Input
 
-Place `masterlist.csv` beside `BookResaleFinder.exe`, or choose another CSV from the GUI. The file must contain an `ASIN` column.
+Extract the complete release folder and keep the `_internal` directory beside `BookResaleFinder.exe`. Place `masterlist.csv` beside the executable, or choose another CSV from the GUI. The file must contain an `ASIN` column.
 
 ```csv
 ASIN
@@ -38,7 +38,7 @@ Credentials can also be supplied using `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET`
 pwsh ./scripts/build.ps1
 ```
 
-The portable package is created at `dist/BookResaleFinder-Windows.zip`.
+The portable package is created at `dist/BookResaleFinder-Windows.zip`. Extract the complete folder before running the executable.
 
 ## Development
 
@@ -49,3 +49,7 @@ python -m pip install -e ".[test]"
 python -m pytest
 python -m book_resale_finder
 ```
+
+## Startup diagnostics
+
+If the application cannot open, it now displays an error and writes `startup.log` under `%LOCALAPPDATA%\Book Resale Finder`.
