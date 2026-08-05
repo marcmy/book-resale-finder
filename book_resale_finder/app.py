@@ -30,8 +30,8 @@ def main() -> int:
     window = MainWindow()
     window.show()
 
-    # CI launches the real frozen executable and verifies that styling is
-    # actually active—not merely that an unstyled window can open.
+    # CI launches the real frozen executable and verifies that styling and the
+    # result-card layout are actually usable—not merely that a window opens.
     if os.environ.get("BRF_SMOKE_TEST") == "1":
         light_button = window.theme_buttons["light"]
         dark_button = window.theme_buttons["dark"]
@@ -41,6 +41,27 @@ def main() -> int:
         dark_stylesheet = window.styleSheet()
         if not light_stylesheet or not dark_stylesheet or light_stylesheet == dark_stylesheet:
             raise RuntimeError("Theme smoke test failed: light and dark styles were not applied.")
+
+        values = [
+            window.processed_value,
+            window.found_value,
+            window.search_calls_value,
+            window.item_calls_value,
+            window.search_quota_value,
+            window.item_quota_value,
+        ]
+        for index, value in enumerate(values, start=1):
+            value.setText(str(index * 100))
+        app.processEvents()
+        if any(
+            not value.text()
+            or value.width() <= 0
+            or value.height() <= 0
+            or value.visibleRegion().isEmpty()
+            for value in values
+        ):
+            raise RuntimeError("Stat-card smoke test failed: one or more values are not visible.")
+
         QTimer.singleShot(1500, app.quit)
 
     return app.exec()
