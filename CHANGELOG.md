@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1
+
+- Fixed a double theme guard that prevented every stylesheet from being applied in v1.1.0.
+- Extended executable smoke tests to fail when light and dark themes are missing or identical.
+- Applied the selected theme to credential dialogs, message boxes, and tray menus.
+- Reworded the eBay request breakdown as simple addition: first searches + second searches + shipping checks = total requests.
+- Simplified the separate daily-quota explanation.
+
 ## 1.1.0
 
 - Removed the always-visible eBay credential fields from the main window; missing credentials are requested in a dedicated dialog and stored in Windows Credential Manager.

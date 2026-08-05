@@ -2,7 +2,7 @@ from __future__ import annotations
 
 APP_NAME = "Book Resale Finder"
 APP_ID = "com.marcmy.bookresalefinder"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 KEYRING_SERVICE = "Book Resale Finder eBay API"
 
 DEFAULT_CONFIG = {
