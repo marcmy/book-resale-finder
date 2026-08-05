@@ -9,8 +9,10 @@ class FakeEbayClient(EbayClient):
         super().__init__("id", "secret", config or {})
         self._candidates = candidates
         self._shipping = shipping
+        self.search_kinds = []
 
-    async def _search(self, *, gtin=None, query=None, limit=10):
+    async def _search(self, *, gtin=None, query=None, limit=10, call_kind="primary_search"):
+        self.search_kinds.append(call_kind)
         return self._candidates[:limit]
 
     async def _shipping_cost(self, candidate):
@@ -28,6 +30,7 @@ def test_selects_lowest_item_price_without_shipping():
     )
     assert result.item_id == "2"
     assert result.best_price == 8.0
+    assert client.search_kinds == ["primary_search"]
 
 
 def test_shipping_can_change_the_best_listing():
@@ -61,3 +64,20 @@ def test_builds_specific_condition_filter():
         "conditionIds:{1000|2750|4000|5000},"
         "buyingOptions:{FIXED_PRICE|AUCTION}"
     )
+
+
+class FallbackClient(FakeEbayClient):
+    async def _search(self, *, gtin=None, query=None, limit=10, call_kind="primary_search"):
+        self.search_kinds.append(call_kind)
+        if gtin:
+            return []
+        return [_Candidate("2", "Fallback", 9.0, "USD", "Good", "https://two")]
+
+
+def test_labels_primary_and_fallback_searches_separately():
+    client = FallbackClient(candidates=[], shipping={}, config={"fallback_to_search": True})
+    result = asyncio.run(
+        client.find_best_listing(normalize_identifier("9780306406157"), include_shipping=False)
+    )
+    assert result.item_id == "2"
+    assert client.search_kinds == ["primary_search", "fallback_search"]
