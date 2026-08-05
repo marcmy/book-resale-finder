@@ -1,4 +1,5 @@
 import asyncio
+from collections import Counter
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -12,6 +13,7 @@ class FakeClient:
 
     def __init__(self, client_id, client_secret, config):
         self.api_calls = 0
+        self.api_call_breakdown = Counter()
 
     async def __aenter__(self):
         return self
@@ -21,6 +23,7 @@ class FakeClient:
 
     async def find_best_listing(self, identifier, *, include_shipping):
         self.api_calls += 1
+        self.api_call_breakdown["primary_search"] += 1
         self.calls.append(identifier.primary_value)
         return SearchResult(
             asin=identifier.original,
@@ -60,6 +63,7 @@ def test_runner_deduplicates_calls_but_preserves_rows(tmp_path: Path, monkeypatc
     assert summary.total_identifiers == 3
     assert summary.unique_identifiers == 2
     assert summary.found == 3
+    assert summary.api_call_breakdown == {"primary_search": 2}
     assert progress[-1].completed == 3
     assert progress[-1].total == 3
 
