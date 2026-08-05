@@ -25,6 +25,21 @@ def test_completion_output_keeps_results_without_repeating_tutorial():
     assert "Results saved to" in completion_source
 
 
+def test_stat_cards_keep_labels_and_values_on_one_line():
+    stat_source = inspect.getsource(MainWindow._stat)
+    assert "QHBoxLayout" in stat_source
+    assert "setMinimumWidth(90)" in stat_source
+    assert "AlignRight" in stat_source
+    assert "QVBoxLayout" not in stat_source
+
+
+def test_quota_reserve_wording_describes_the_stop_threshold():
+    build_source = inspect.getsource(MainWindow._build_ui)
+    assert 'label.setText("Stop with at least")' in build_source
+    assert 'setSuffix(" calls remaining")' in build_source
+    assert "disable the safety buffer" in build_source
+
+
 def test_quota_reset_is_converted_to_local_12_hour_time():
     eastern_daylight = timezone(timedelta(hours=-4))
     assert MainWindow._format_quota_reset(
