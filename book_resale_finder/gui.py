@@ -524,25 +524,6 @@ class MainWindow(QMainWindow):
         self.api_value.setText(str(info.api_calls))
         self.status_label.setText(f"{info.status}: {info.current_identifier}")
 
-    @staticmethod
-    def _request_breakdown_lines(summary: RunSummary) -> list[str]:
-        breakdown = summary.api_call_breakdown
-        first_searches = breakdown.get("primary_search", 0)
-        second_searches = breakdown.get("fallback_search", 0)
-        shipping_checks = breakdown.get("shipping_detail", 0)
-        other = max(0, summary.api_calls - first_searches - second_searches - shipping_checks)
-
-        lines = [
-            "How that total was calculated:",
-            f"  {first_searches} first searches — normally one for each unique book",
-            f"+ {second_searches} second searches — only when the first search found nothing",
-            f"+ {shipping_checks} shipping checks — only when shipping comparison is enabled",
-        ]
-        if other:
-            lines.append(f"+ {other} repeated/other requests")
-        lines.append(f"= {summary.api_calls} total requests")
-        return lines
-
     @Slot(object)
     def _on_completed(self, summary: RunSummary) -> None:
         self.last_output = summary.output_file
@@ -570,27 +551,27 @@ class MainWindow(QMainWindow):
             f"Matches found: {summary.found}",
             f"No match: {summary.no_match}",
             f"Failed: {summary.failed}",
-            "",
-            *self._request_breakdown_lines(summary),
-            "",
+            f"eBay requests used: {summary.api_calls}",
             f"Elapsed time: {self._format_elapsed(summary.elapsed_seconds)}",
         ]
 
         if summary.quota.remaining is not None:
             if summary.quota.limit is not None:
-                lines.append(
-                    f"eBay says {summary.quota.remaining:,} of {summary.quota.limit:,} daily requests remain."
+                quota_line = (
+                    f"Daily eBay quota remaining: {summary.quota.remaining:,} of "
+                    f"{summary.quota.limit:,}"
                 )
             else:
-                lines.append(f"eBay says {summary.quota.remaining:,} daily requests remain.")
+                quota_line = f"Daily eBay quota remaining: {summary.quota.remaining:,}"
             if quota_is_stale:
-                lines.append(
-                    "* eBay's daily counter has not caught up yet. It does not change the exact total shown above."
-                )
+                quota_line += " *"
+            lines.append(quota_line)
         else:
-            lines.append("eBay's separate daily-limit counter was unavailable.")
+            lines.append("Daily eBay quota remaining: unavailable")
         if summary.quota.reset_at:
-            lines.append(f"eBay says the daily limit resets at: {summary.quota.reset_at}")
+            lines.append(f"Quota reset: {summary.quota.reset_at}")
+        if quota_is_stale:
+            lines.append("* eBay quota reporting may be delayed.")
         lines.extend(("", f"Results saved to: {summary.output_file}"))
 
         self.summary_box.setPlainText("\n".join(lines))
