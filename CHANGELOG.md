@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.9
+
+- Keep quota cards dedicated to quota data instead of relabeling them with unrelated scan statistics.
+- Hide an individual quota card when eBay provides no value for that quota.
+- Keep no-match, failed, and not-scanned counts in the completion summary where they belong.
+- Show one direct warning when a configured safety buffer could not be enforced because eBay returned no quota data.
+
 ## 1.1.8
 
 - Fixed quota parsing for eBay Analytics responses that name Browse limits by API method (`search` and `getItem`) instead of endpoint resource (`item_summary` and `item`).

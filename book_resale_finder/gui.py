@@ -18,9 +18,8 @@ class MainWindow(_MainWindow):
     """Apply presentation and quota-reporting fixes to the main interface."""
 
     def _stat(self, label: str, tooltip: str) -> tuple[QFrame, QLabel]:
-        # The previous two-line cards could be vertically compressed until the
-        # value label was completely clipped. Keep each label and value on one
-        # line so every result remains visible at all supported window sizes.
+        # Keep each label and value on one line so every result remains visible
+        # at all supported window sizes.
         frame = QFrame()
         frame.setProperty("class", "stat")
         frame.setMinimumHeight(48)
@@ -45,9 +44,9 @@ class MainWindow(_MainWindow):
         layout.addWidget(label_widget, 1)
         layout.addWidget(value)
 
-        if not hasattr(self, "_stat_labels"):
-            self._stat_labels: dict[QLabel, tuple[QLabel, str]] = {}
-        self._stat_labels[value] = (label_widget, label)
+        if not hasattr(self, "_stat_frames"):
+            self._stat_frames: dict[QLabel, QFrame] = {}
+        self._stat_frames[value] = frame
         return frame, value
 
     def _build_ui(self) -> None:
@@ -65,18 +64,14 @@ class MainWindow(_MainWindow):
             "disable the safety buffer."
         )
 
-    def _set_stat_card(self, value_widget: QLabel, label: str, value: str) -> None:
-        label_widget, _ = self._stat_labels[value_widget]
-        label_widget.setText(label)
-        value_widget.setText(value)
-
-    def _restore_quota_card_labels(self) -> None:
-        for value_widget in (self.search_quota_value, self.item_quota_value):
-            label_widget, original = self._stat_labels[value_widget]
-            label_widget.setText(original)
+    def _set_quota_cards_visible(self, search_visible: bool, item_visible: bool) -> None:
+        self._stat_frames[self.search_quota_value].setVisible(search_visible)
+        self._stat_frames[self.item_quota_value].setVisible(item_visible)
 
     def _start_scan(self) -> None:
-        self._restore_quota_card_labels()
+        # Show both quota cards while a new lookup is running. Each card is
+        # hidden after completion only when eBay supplied no value for it.
+        self._set_quota_cards_visible(True, True)
         super()._start_scan()
 
     @staticmethod
@@ -93,42 +88,31 @@ class MainWindow(_MainWindow):
         return "\n".join(compact).strip()
 
     def _quota_safety_warnings(self, summary: RunSummary) -> list[str]:
-        if self.quota_reserve.value() <= 0:
+        reserve = self.quota_reserve.value()
+        if reserve <= 0:
             return []
+
         warnings: list[str] = []
         if summary.quota.remaining is None:
             warnings.append(
-                "Quota safety buffer was not enforced because eBay did not return search-quota data."
+                f"eBay did not provide search-quota data, so the {reserve:,}-call safety buffer could not be enforced."
             )
         if self.shipping_toggle.isChecked() and summary.item_quota.remaining is None:
             warnings.append(
-                "Shipping quota safety was not enforced because eBay did not return item-detail quota data."
+                f"eBay did not provide item-detail quota data, so the {reserve:,}-call shipping safety buffer could not be enforced."
             )
         return warnings
 
     def _on_completed(self, summary: RunSummary) -> None:
         super()._on_completed(summary)
 
-        # Never waste two prominent cards on the word “Unavailable.” When eBay
-        # omits quota data, replace those cards with useful run results.
-        if summary.quota.remaining is None:
-            self._set_stat_card(self.search_quota_value, "No matches", f"{summary.no_match:,}")
-        else:
-            label_widget, original = self._stat_labels[self.search_quota_value]
-            label_widget.setText(original)
-
-        if summary.item_quota.remaining is None:
-            if summary.skipped:
-                self._set_stat_card(
-                    self.item_quota_value,
-                    "Failed / not scanned",
-                    f"{summary.failed:,} / {summary.skipped:,}",
-                )
-            else:
-                self._set_stat_card(self.item_quota_value, "Failed", f"{summary.failed:,}")
-        else:
-            label_widget, original = self._stat_labels[self.item_quota_value]
-            label_widget.setText(original)
+        # A quota card must remain a quota card. If eBay supplies no quota
+        # value, hide that card rather than relabeling it with an unrelated
+        # scan statistic.
+        self._set_quota_cards_visible(
+            summary.quota.remaining is not None,
+            summary.item_quota.remaining is not None,
+        )
 
         cleaned = self._remove_unavailable_quota_lines(self.summary_box.toPlainText())
         warnings = self._quota_safety_warnings(summary)
