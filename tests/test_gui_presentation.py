@@ -18,13 +18,13 @@ def test_light_and_dark_stylesheets_are_nonempty_and_different():
 
 
 def test_completion_output_keeps_results_without_repeating_tutorial():
-    source = inspect.getsource(MainWindow._on_completed)
-    assert "How that total was calculated" not in source
-    assert "first searches" not in source
-    assert "eBay requests used" in source
-    assert "Elapsed time" in source
-    assert "Results saved to" in source
-
+    completion_source = inspect.getsource(MainWindow._on_completed)
+    usage_source = inspect.getsource(MainWindow._format_request_usage)
+    assert "How that total was calculated" not in completion_source
+    assert "_format_request_usage" in completion_source
+    assert "eBay requests used" in usage_source
+    assert "Elapsed time" in completion_source
+    assert "Results saved to" in completion_source
 
 
 def test_quota_reset_is_converted_to_local_12_hour_time():
@@ -36,7 +36,6 @@ def test_quota_reset_is_converted_to_local_12_hour_time():
 
 def test_invalid_quota_reset_is_left_readable():
     assert MainWindow._format_quota_reset("unknown") == "unknown"
-
 
 
 def test_request_usage_compactly_explains_large_run_total():
