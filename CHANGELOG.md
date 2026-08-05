@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.8
+
+- Fixed quota parsing for eBay Analytics responses that name Browse limits by API method (`search` and `getItem`) instead of endpoint resource (`item_summary` and `item`).
+- Retry quota retrieval once without API filters when the filtered response omits the needed limits.
+- Removed useless `quota remaining: unavailable` lines from the completion summary.
+- When quota data is genuinely absent, reuse the two quota cards for useful no-match, failed, and not-scanned counts.
+- Clearly warn when a configured quota safety buffer could not be enforced because eBay supplied no quota data.
+
 ## 1.1.7
 
 - Fixed the six scan-stat cards hiding their values when the window was vertically compressed.
