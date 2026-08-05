@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import replace
 from collections import defaultdict
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -35,7 +35,6 @@ async def run_scan(
     raw_identifiers = read_asins(input_file)
     normalized = [normalize_identifier(value) for value in raw_identifiers]
 
-    # Process each unique normalized value once, then reuse the result for duplicates.
     grouped_indices: dict[str, list[int]] = defaultdict(list)
     for index, identifier in enumerate(normalized):
         key = identifier.primary_value.casefold()
@@ -118,6 +117,7 @@ async def run_scan(
 
         quota = await ebay.fetch_quota()
         api_calls = ebay.api_calls
+        api_call_breakdown = dict(ebay.api_call_breakdown)
 
     final_results = [result for result in results if result is not None]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -134,6 +134,7 @@ async def run_scan(
         no_match=no_match,
         failed=row_failures,
         api_calls=api_calls,
+        api_call_breakdown=api_call_breakdown,
         elapsed_seconds=time.monotonic() - started,
         output_file=output_file,
         quota=quota,
