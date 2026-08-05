@@ -1,0 +1,6 @@
+Example request math shown by the app:
+
+20 first searches
++ 10 second searches because the first search found nothing
++ 0 shipping checks
+= 30 total eBay requests
