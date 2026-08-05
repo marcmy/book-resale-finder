@@ -54,7 +54,7 @@ def stylesheet(theme: dict[str, str]) -> str:
         border-radius: 8px;
     }}
     QLabel[class~="statValue"] {{ font-size: 16px; font-weight: 800; }}
-    QLineEdit {{
+    QLineEdit, QComboBox, QSpinBox {{
         min-height: 36px;
         padding: 0 10px;
         background: {theme['field']};
@@ -63,7 +63,19 @@ def stylesheet(theme: dict[str, str]) -> str:
         border-radius: 8px;
         selection-background-color: {theme['blue']};
     }}
-    QLineEdit:focus {{ border: 2px solid {theme['blue']}; }}
+    QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border: 2px solid {theme['blue']}; }}
+    QComboBox::drop-down {{ border: 0; width: 28px; }}
+    QComboBox QAbstractItemView {{
+        background: {theme['panel']};
+        color: {theme['text']};
+        border: 1px solid {theme['line']};
+        selection-background-color: {theme['stat']};
+    }}
+    QSpinBox::up-button, QSpinBox::down-button {{
+        width: 20px;
+        border: 0;
+        background: {theme['stat']};
+    }}
     QPushButton {{
         min-height: 38px;
         padding: 0 16px;

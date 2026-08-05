@@ -2,7 +2,7 @@ from __future__ import annotations
 
 APP_NAME = "Book Resale Finder"
 APP_ID = "com.marcmy.bookresalefinder"
-VERSION = "1.1.4"
+VERSION = "1.1.5"
 KEYRING_SERVICE = "Book Resale Finder eBay API"
 
 DEFAULT_CONFIG = {
@@ -18,6 +18,8 @@ DEFAULT_CONFIG = {
     "shipping_item_limit": 3,
     "price_item_limit": 10,
     "fallback_to_search": True,
+    "output_format": "csv",
+    "quota_reserve": 100,
     "request_timeout_seconds": 30,
     "max_retries": 3,
 }

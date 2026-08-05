@@ -3,6 +3,8 @@
 input_csv: masterlist.csv
 output_dir: output
 output_prefix: book_resale_results
+output_format: csv
+quota_reserve: 100
 
 marketplace_id: EBAY_US
 conditions:

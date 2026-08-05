@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.5
+
+- Kept the broader unmatched-ISBN retry enabled by default because it recovered most matches in the 1,706-book test.
+- Added a clearly labeled option to disable that retry and reproduce the original tool's one-search-per-book behavior.
+- Added pre-scan minimum/maximum API call estimates.
+- Separated search API calls/quota from item-detail API calls/quota.
+- Added a configurable quota reserve that stops safely and writes partial results before the reported quota is exhausted.
+- Reused shipping already present in eBay search results, avoiding item-detail calls unless shipping is missing.
+- Added CSV, XLSX, and dual-output options; CSV is now the default for formula compatibility.
+- Locally adjusts remaining quota when eBay's analytics response has not caught up yet.
+
 ## 1.1.4
 
 - Fixed the quota display to select eBay's `item_summary` search quota instead of the unused item-detail quota.

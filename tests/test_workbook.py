@@ -1,10 +1,42 @@
+import csv
 from pathlib import Path
 
 from openpyxl import load_workbook
 import pytest
 
 from book_resale_finder.models import SearchResult
-from book_resale_finder.workbook import ebay_search_url, inches_to_excel_width, write_results_xlsx
+from book_resale_finder.workbook import (
+    ebay_search_url,
+    inches_to_excel_width,
+    write_results_csv,
+    write_results_xlsx,
+)
+
+
+def test_csv_output_is_plain_values(tmp_path: Path):
+    output = tmp_path / "results.csv"
+    write_results_csv(
+        [
+            SearchResult(
+                asin="9780306406157",
+                title="A test book",
+                best_price=12.34,
+                condition="Very Good",
+                listing_url="https://www.ebay.com/itm/123",
+            )
+        ],
+        output,
+    )
+    with output.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+    assert rows[0] == ["ASIN", "Title", "Best Price", "Condition", "Listing URL"]
+    assert rows[1] == [
+        "9780306406157",
+        "A test book",
+        "12.34",
+        "Very Good",
+        "https://www.ebay.com/itm/123",
+    ]
 
 
 def test_workbook_headers_widths_and_links(tmp_path: Path):

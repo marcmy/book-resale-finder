@@ -62,6 +62,9 @@ def load_settings() -> dict[str, Any]:
     defaults: dict[str, Any] = {
         "theme": "auto",
         "include_shipping": False,
+        "retry_unmatched": True,
+        "output_format": "csv",
+        "quota_reserve": 100,
         "input_file": "",
     }
     path = settings_path()
@@ -90,8 +93,6 @@ def load_credentials(config: dict[str, Any]) -> tuple[str | None, str | None]:
     try:
         import keyring
 
-        # Read the new service first, then transparently migrate credentials
-        # saved by the original isbn_lookup.exe.
         service_names = (KEYRING_SERVICE, "ebay_api_credentials")
         for service in service_names:
             client_id = client_id or (keyring.get_password(service, "client_id") or "").strip()
