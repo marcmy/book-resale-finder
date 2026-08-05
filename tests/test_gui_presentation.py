@@ -57,6 +57,24 @@ def test_unavailable_quota_lines_are_removed_instead_of_displayed():
     assert "Result saved to: results.csv" in cleaned
 
 
+def test_missing_quota_cards_are_hidden_not_repurposed():
+    completion_source = inspect.getsource(MainWindow._on_completed)
+    visibility_source = inspect.getsource(MainWindow._set_quota_cards_visible)
+    assert "summary.quota.remaining is not None" in completion_source
+    assert "summary.item_quota.remaining is not None" in completion_source
+    assert "No matches" not in completion_source
+    assert "Failed / not scanned" not in completion_source
+    assert "setVisible(search_visible)" in visibility_source
+    assert "setVisible(item_visible)" in visibility_source
+
+
+def test_missing_quota_warning_is_direct_and_uses_configured_reserve():
+    warning_source = inspect.getsource(MainWindow._quota_safety_warnings)
+    assert "eBay did not provide search-quota data" in warning_source
+    assert "safety buffer could not be enforced" in warning_source
+    assert "reserve:," in warning_source
+
+
 def test_quota_reset_is_converted_to_local_12_hour_time():
     eastern_daylight = timezone(timedelta(hours=-4))
     assert MainWindow._format_quota_reset(
