@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime, tzinfo
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QThread, QTimer, Qt, QUrl, Signal, Slot
@@ -569,7 +570,7 @@ class MainWindow(QMainWindow):
         else:
             lines.append("Daily eBay quota remaining: unavailable")
         if summary.quota.reset_at:
-            lines.append(f"Quota reset: {summary.quota.reset_at}")
+            lines.append(f"Quota reset: {self._format_quota_reset(summary.quota.reset_at)}")
         if quota_is_stale:
             lines.append("* eBay quota reporting may be delayed.")
         lines.extend(("", f"Results saved to: {summary.output_file}"))
@@ -625,6 +626,20 @@ class MainWindow(QMainWindow):
         if self.started_at is None:
             return
         self.elapsed_label.setText(f"Elapsed {self._format_elapsed(time.monotonic() - self.started_at)}")
+
+    @staticmethod
+    def _format_quota_reset(value: str, local_timezone: tzinfo | None = None) -> str:
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.astimezone()
+            else:
+                parsed = parsed.astimezone(local_timezone)
+            formatted = parsed.strftime("%m-%d-%Y %I:%M %p")
+            date_part, time_part, meridiem = formatted.split()
+            return f"{date_part} {time_part.lstrip('0')} {meridiem}"
+        except (AttributeError, TypeError, ValueError):
+            return value
 
     @staticmethod
     def _format_elapsed(seconds: float) -> str:
