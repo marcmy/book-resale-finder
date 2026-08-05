@@ -1,7 +1,9 @@
 import inspect
 from datetime import timedelta, timezone
+from pathlib import Path
 
 from book_resale_finder.gui import MainWindow
+from book_resale_finder.models import RunSummary
 from book_resale_finder.theme import DARK, LIGHT, stylesheet
 
 
@@ -34,3 +36,21 @@ def test_quota_reset_is_converted_to_local_12_hour_time():
 
 def test_invalid_quota_reset_is_left_readable():
     assert MainWindow._format_quota_reset("unknown") == "unknown"
+
+
+
+def test_request_usage_compactly_explains_large_run_total():
+    summary = RunSummary(
+        total_identifiers=1706,
+        unique_identifiers=1706,
+        found=1611,
+        no_match=95,
+        failed=0,
+        api_calls=3054,
+        elapsed_seconds=0,
+        output_file=Path("results.xlsx"),
+        api_call_breakdown={"primary_search": 1706, "fallback_search": 1348},
+    )
+    assert MainWindow._format_request_usage(summary) == (
+        "eBay requests used: 3,054 (1,706 first searches + 1,348 second searches)"
+    )

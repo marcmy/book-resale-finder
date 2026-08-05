@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -359,6 +360,65 @@ class EbayClient:
             search_method=method,
         )
 
+    @staticmethod
+    def _quota_from_payload(payload: dict[str, Any]) -> QuotaInfo:
+        """Return the Browse item_summary/search quota, never the item-detail quota."""
+        ranked_resources: list[tuple[int, dict[str, Any]]] = []
+        for group in payload.get("rateLimits") or []:
+            api_name = str(group.get("apiName") or "").casefold()
+            api_context = str(group.get("apiContext") or "").casefold()
+            if api_name and api_name != "browse":
+                continue
+            if api_context and api_context != "buy":
+                continue
+
+            for resource in group.get("resources") or []:
+                raw_name = str(resource.get("name") or "")
+                normalized = re.sub(r"[^a-z0-9]+", "_", raw_name.casefold()).strip("_")
+                if normalized == "item_summary":
+                    score = 100
+                elif "item_summary" in normalized:
+                    score = 90
+                elif normalized == "search":
+                    score = 80
+                elif "search" in normalized:
+                    score = 70
+                else:
+                    continue
+                ranked_resources.append((score, resource))
+
+        if not ranked_resources:
+            return QuotaInfo()
+
+        resource = max(ranked_resources, key=lambda entry: entry[0])[1]
+        rates = resource.get("rates") or []
+        if not rates:
+            return QuotaInfo()
+
+        def time_window(rate: dict[str, Any]) -> int | None:
+            try:
+                return int(rate.get("timeWindow"))
+            except (TypeError, ValueError):
+                return None
+
+        rate = next((candidate for candidate in rates if time_window(candidate) == 86400), rates[0])
+        try:
+            limit = int(rate.get("limit")) if rate.get("limit") is not None else None
+            remaining = int(rate.get("remaining")) if rate.get("remaining") is not None else None
+            if rate.get("count") is not None:
+                used = int(rate.get("count"))
+            else:
+                used = limit - remaining if limit is not None and remaining is not None else None
+        except (TypeError, ValueError):
+            limit = used = remaining = None
+
+        return QuotaInfo(
+            limit=limit,
+            used=used,
+            remaining=remaining,
+            reset_at=str(rate.get("reset") or "") or None,
+        )
+
     async def fetch_quota(self) -> QuotaInfo:
         try:
             payload = await self._request_json(
@@ -369,30 +429,4 @@ class EbayClient:
             )
         except Exception:
             return QuotaInfo()
-
-        resources = payload.get("rateLimits") or []
-        for group in resources:
-            for resource in group.get("resources") or []:
-                name = str(resource.get("name") or "").casefold()
-                if "search" not in name and "item" not in name:
-                    continue
-                rates = resource.get("rates") or []
-                if not rates:
-                    continue
-                rate = rates[0]
-                try:
-                    limit = int(rate.get("limit")) if rate.get("limit") is not None else None
-                    remaining = int(rate.get("remaining")) if rate.get("remaining") is not None else None
-                    if rate.get("count") is not None:
-                        used = int(rate.get("count"))
-                    else:
-                        used = limit - remaining if limit is not None and remaining is not None else None
-                except (TypeError, ValueError):
-                    limit = used = remaining = None
-                return QuotaInfo(
-                    limit=limit,
-                    used=used,
-                    remaining=remaining,
-                    reset_at=str(rate.get("reset") or "") or None,
-                )
-        return QuotaInfo()
+        return self._quota_from_payload(payload)

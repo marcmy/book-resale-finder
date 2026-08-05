@@ -81,3 +81,57 @@ def test_labels_primary_and_fallback_searches_separately():
     )
     assert result.item_id == "2"
     assert client.search_kinds == ["primary_search", "fallback_search"]
+
+
+
+def test_quota_parser_prefers_search_resource_over_item_details():
+    payload = {
+        "rateLimits": [
+            {
+                "apiContext": "buy",
+                "apiName": "browse",
+                "resources": [
+                    {
+                        "name": "item",
+                        "rates": [{"limit": 5000, "count": 0, "remaining": 5000, "timeWindow": 86400}],
+                    },
+                    {
+                        "name": "item_summary",
+                        "rates": [
+                            {
+                                "limit": 5000,
+                                "count": 3054,
+                                "remaining": 1946,
+                                "reset": "2026-08-06T07:00:00.000Z",
+                                "timeWindow": 86400,
+                            }
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+    quota = EbayClient._quota_from_payload(payload)
+    assert quota.limit == 5000
+    assert quota.used == 3054
+    assert quota.remaining == 1946
+    assert quota.reset_at == "2026-08-06T07:00:00.000Z"
+
+
+def test_quota_parser_does_not_misreport_item_detail_quota_as_search_quota():
+    payload = {
+        "rateLimits": [
+            {
+                "apiContext": "buy",
+                "apiName": "browse",
+                "resources": [
+                    {
+                        "name": "item",
+                        "rates": [{"limit": 5000, "count": 0, "remaining": 5000, "timeWindow": 86400}],
+                    }
+                ],
+            }
+        ]
+    }
+    quota = EbayClient._quota_from_payload(payload)
+    assert quota.remaining is None
