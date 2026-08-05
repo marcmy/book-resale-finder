@@ -4,13 +4,16 @@ import asyncio
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QThread, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QEvent, QObject, QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QCheckBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -27,7 +30,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import QUrl
 
 from .config import (
     executable_dir,
@@ -76,8 +78,52 @@ class ScanWorker(QObject):
             self.completed.emit(summary)
 
 
-class CredentialsDialog(QMessageBox):
-    """Kept for compatibility only; credentials are edited inline in the main window."""
+class CredentialsDialog(QDialog):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        client_id: str = "",
+        client_secret: str = "",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("eBay API credentials")
+        self.setModal(True)
+        self.setMinimumWidth(470)
+
+        layout = QVBoxLayout(self)
+        explanation = QLabel(
+            "Enter the production App ID and Cert ID from eBay. They are stored in "
+            "Windows Credential Manager and are not shown on the main screen."
+        )
+        explanation.setWordWrap(True)
+        layout.addWidget(explanation)
+
+        form = QFormLayout()
+        self.client_id_input = QLineEdit(client_id)
+        self.client_id_input.setPlaceholderText("Client ID / App ID")
+        self.client_secret_input = QLineEdit(client_secret)
+        self.client_secret_input.setPlaceholderText("Client Secret / Cert ID")
+        self.client_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow("Client ID", self.client_id_input)
+        form.addRow("Client Secret", self.client_secret_input)
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._accept_if_complete)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _accept_if_complete(self) -> None:
+        if not all(self.credentials()):
+            QMessageBox.warning(self, APP_NAME, "Enter both the Client ID and Client Secret.")
+            return
+        self.accept()
+
+    def credentials(self) -> tuple[str, str]:
+        return self.client_id_input.text().strip(), self.client_secret_input.text().strip()
 
 
 class MainWindow(QMainWindow):
@@ -90,10 +136,11 @@ class MainWindow(QMainWindow):
         self.started_at: float | None = None
         self.last_output: Path | None = None
         self._closing = False
+        self._applying_theme = False
 
         self.setWindowTitle(APP_NAME)
-        self.resize(820, 720)
-        self.setMinimumSize(760, 660)
+        self.resize(820, 650)
+        self.setMinimumSize(760, 600)
         self._set_icon()
         self._build_ui()
         self._load_state()
@@ -117,16 +164,20 @@ class MainWindow(QMainWindow):
         frame.setProperty("class", "card")
         return frame
 
-    def _stat(self, label: str) -> tuple[QFrame, QLabel]:
+    def _stat(self, label: str, tooltip: str) -> tuple[QFrame, QLabel]:
         frame = QFrame()
         frame.setProperty("class", "stat")
+        frame.setMinimumHeight(78)
+        frame.setToolTip(tooltip)
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 9, 12, 9)
+        layout.setSpacing(2)
         label_widget = QLabel(label)
         label_widget.setProperty("class", "statLabel")
+        label_widget.setMinimumHeight(18)
         value = QLabel("—")
         value.setProperty("class", "statValue")
+        value.setMinimumHeight(28)
         layout.addWidget(label_widget)
         layout.addWidget(value)
         return frame, value
@@ -140,14 +191,9 @@ class MainWindow(QMainWindow):
         outer.setSpacing(12)
 
         header = QHBoxLayout()
-        title_box = QVBoxLayout()
         title = QLabel(APP_NAME)
         title.setObjectName("title")
-        subtitle = QLabel("Find the lowest active eBay offer for every ASIN in a Keepa export.")
-        subtitle.setObjectName("subtitle")
-        title_box.addWidget(title)
-        title_box.addWidget(subtitle)
-        header.addLayout(title_box, 1)
+        header.addWidget(title, 1)
 
         theme_box = QHBoxLayout()
         theme_label = QLabel("Theme")
@@ -176,6 +222,9 @@ class MainWindow(QMainWindow):
         path_row = QHBoxLayout()
         self.input_path = QLineEdit()
         self.input_path.setPlaceholderText("masterlist.csv")
+        self.input_path.setToolTip(
+            "Choose any CSV filename. Relative names such as list.csv are read from the application folder."
+        )
         self.browse_button = QPushButton("Browse")
         self.browse_button.setProperty("class", "secondary")
         self.browse_button.clicked.connect(self._browse_input)
@@ -183,39 +232,12 @@ class MainWindow(QMainWindow):
         path_row.addWidget(self.browse_button)
         input_layout.addLayout(path_row)
 
-        self.shipping_toggle = QCheckBox("Include shipping when choosing the best price (uses extra API calls)")
+        self.shipping_toggle = QCheckBox("Include shipping when choosing the best price (uses extra eBay requests)")
         self.shipping_toggle.setToolTip(
             "Checks up to the configured number of cheapest listings individually and compares item price plus shipping."
         )
         input_layout.addWidget(self.shipping_toggle)
         outer.addWidget(input_card)
-
-        credentials_card = self._card()
-        credentials_layout = QVBoxLayout(credentials_card)
-        credentials_layout.setContentsMargins(14, 12, 14, 14)
-        credentials_layout.setSpacing(10)
-        credential_header = QHBoxLayout()
-        credential_title = QLabel("EBAY API CREDENTIALS")
-        credential_title.setObjectName("sectionTitle")
-        self.credentials_status = QLabel()
-        self.credentials_status.setObjectName("muted")
-        credential_header.addWidget(credential_title)
-        credential_header.addStretch(1)
-        credential_header.addWidget(self.credentials_status)
-        credentials_layout.addLayout(credential_header)
-        credential_grid = QGridLayout()
-        self.client_id_input = QLineEdit()
-        self.client_id_input.setPlaceholderText("Client ID / App ID")
-        self.client_secret_input = QLineEdit()
-        self.client_secret_input.setPlaceholderText("Client Secret / Cert ID")
-        self.client_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.save_credentials_button = QPushButton("Save credentials")
-        self.save_credentials_button.clicked.connect(self._save_credentials)
-        credential_grid.addWidget(self.client_id_input, 0, 0)
-        credential_grid.addWidget(self.client_secret_input, 0, 1)
-        credential_grid.addWidget(self.save_credentials_button, 0, 2)
-        credentials_layout.addLayout(credential_grid)
-        outer.addWidget(credentials_card)
 
         run_card = self._card()
         run_layout = QVBoxLayout(run_card)
@@ -237,15 +259,29 @@ class MainWindow(QMainWindow):
         self.progress_bar.setFormat("Ready")
         run_layout.addWidget(self.progress_bar)
 
-        self.status_label = QLabel("Ready to scan masterlist.csv")
+        self.status_label = QLabel("Ready")
         self.status_label.setObjectName("muted")
         run_layout.addWidget(self.status_label)
 
         stats = QGridLayout()
-        processed_frame, self.processed_value = self._stat("Processed")
-        found_frame, self.found_value = self._stat("Listings found")
-        api_frame, self.api_value = self._stat("API calls this run")
-        remaining_frame, self.remaining_value = self._stat("Calls remaining")
+        stats.setVerticalSpacing(10)
+        stats.setHorizontalSpacing(12)
+        processed_frame, self.processed_value = self._stat(
+            "Identifiers processed",
+            "Rows completed from the selected CSV. Duplicate identifiers are queried only once.",
+        )
+        found_frame, self.found_value = self._stat(
+            "Matches found",
+            "Identifiers for which at least one eligible eBay listing was found.",
+        )
+        api_frame, self.api_value = self._stat(
+            "eBay lookup requests",
+            "Search and listing-detail requests sent by this scan, including fallbacks and optional shipping lookups.",
+        )
+        remaining_frame, self.remaining_value = self._stat(
+            "eBay quota remaining",
+            "The daily remaining quota reported by eBay. This service can update later than the live run counter.",
+        )
         stats.addWidget(processed_frame, 0, 0)
         stats.addWidget(found_frame, 0, 1)
         stats.addWidget(api_frame, 1, 0)
@@ -254,9 +290,9 @@ class MainWindow(QMainWindow):
 
         self.summary_box = QTextEdit()
         self.summary_box.setReadOnly(True)
-        self.summary_box.setMinimumHeight(110)
+        self.summary_box.setMinimumHeight(140)
         self.summary_box.setPlainText("Completion details will appear here.")
-        run_layout.addWidget(self.summary_box)
+        run_layout.addWidget(self.summary_box, 1)
 
         buttons = QHBoxLayout()
         self.start_button = QPushButton("START")
@@ -279,32 +315,16 @@ class MainWindow(QMainWindow):
         run_layout.addLayout(buttons)
         outer.addWidget(run_card, 1)
 
-        footer = QHBoxLayout()
         version = QLabel(f"Version {VERSION}")
         version.setObjectName("muted")
-        note = QLabel("Input: ASIN column • Output: formatted XLSX")
-        note.setObjectName("muted")
-        footer.addWidget(version)
-        footer.addStretch(1)
-        footer.addWidget(note)
-        outer.addLayout(footer)
+        outer.addWidget(version)
 
     def _load_state(self) -> None:
         configured_input = str(self.settings.get("input_file") or "").strip()
-        if configured_input:
-            path = Path(configured_input)
-        else:
-            path = resolve_path(str(self.config.get("input_csv", "masterlist.csv")))
-        self.input_path.setText(str(path))
+        self.input_path.setText(configured_input or str(self.config.get("input_csv", "masterlist.csv")))
         self.shipping_toggle.setChecked(bool(self.settings.get("include_shipping", False)))
         theme = str(self.settings.get("theme", "auto"))
         self.theme_buttons.get(theme, self.theme_buttons["auto"]).setChecked(True)
-        client_id, client_secret = load_credentials(self.config)
-        if client_id:
-            self.client_id_input.setText(client_id)
-        if client_secret:
-            self.client_secret_input.setText(client_secret)
-        self._update_credentials_status()
 
     def _create_tray(self) -> None:
         self.tray: QSystemTrayIcon | None = None
@@ -320,15 +340,22 @@ class MainWindow(QMainWindow):
         start_action.triggered.connect(self._start_scan)
         output_action = QAction("Open output folder", self)
         output_action.triggered.connect(self._open_output_folder)
+        credentials_action = QAction("Update eBay credentials…", self)
+        credentials_action.triggered.connect(self._edit_credentials)
         quit_action = QAction("Quit", self)
         quit_action.triggered.connect(self._quit)
         menu.addAction(show_action)
         menu.addAction(start_action)
         menu.addAction(output_action)
+        menu.addAction(credentials_action)
         menu.addSeparator()
         menu.addAction(quit_action)
         self.tray.setContextMenu(menu)
-        self.tray.activated.connect(lambda reason: self._show_window() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
+        self.tray.activated.connect(
+            lambda reason: self._show_window()
+            if reason == QSystemTrayIcon.ActivationReason.DoubleClick
+            else None
+        )
         self.tray.show()
 
     def _show_window(self) -> None:
@@ -343,12 +370,21 @@ class MainWindow(QMainWindow):
         return "dark" if QApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark else "light"
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet(stylesheet(DARK if self._effective_theme() == "dark" else LIGHT))
+        if self._applying_theme:
+            return
+        self._applying_theme = True
+        try:
+            selected = DARK if self._effective_theme() == "dark" else LIGHT
+            new_stylesheet = stylesheet(selected)
+            if self.styleSheet() != new_stylesheet:
+                self.setStyleSheet(new_stylesheet)
+        finally:
+            self._applying_theme = False
 
     @Slot()
     def _theme_changed(self) -> None:
         checked = self.theme_group.checkedButton()
-        if not checked:
+        if not checked or not checked.isChecked():
             return
         self.settings["theme"] = checked.property("themeKey")
         save_settings(self.settings)
@@ -356,14 +392,22 @@ class MainWindow(QMainWindow):
 
     def changeEvent(self, event: QEvent) -> None:
         super().changeEvent(event)
-        if event.type() == QEvent.Type.PaletteChange and self.settings.get("theme") == "auto":
-            self._apply_theme()
+        if (
+            event.type() == QEvent.Type.PaletteChange
+            and self.settings.get("theme") == "auto"
+            and not self._applying_theme
+        ):
+            QTimer.singleShot(0, self._apply_theme)
+
+    def _resolved_input_path(self) -> Path:
+        value = self.input_path.text().strip() or str(self.config.get("input_csv", "masterlist.csv"))
+        return resolve_path(value)
 
     def _browse_input(self) -> None:
-        current = Path(self.input_path.text()).expanduser()
+        current = self._resolved_input_path()
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Keepa masterlist",
+            "Select book list",
             str(current.parent if current.parent.exists() else executable_dir()),
             "CSV files (*.csv);;All files (*.*)",
         )
@@ -372,43 +416,53 @@ class MainWindow(QMainWindow):
             self.settings["input_file"] = selected
             save_settings(self.settings)
 
-    def _update_credentials_status(self) -> None:
-        client_id = self.client_id_input.text().strip()
-        secret = self.client_secret_input.text().strip()
-        self.credentials_status.setText("Configured" if client_id and secret else "Required before scanning")
-
-    def _save_credentials(self) -> None:
-        client_id = self.client_id_input.text().strip()
-        secret = self.client_secret_input.text().strip()
-        if not client_id or not secret:
-            QMessageBox.warning(self, APP_NAME, "Enter both the Client ID and Client Secret.")
-            return
+    def _edit_credentials(self) -> tuple[str, str] | None:
+        current_id, current_secret = load_credentials(self.config)
+        dialog = CredentialsDialog(
+            self,
+            client_id=current_id or "",
+            client_secret=current_secret or "",
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        client_id, client_secret = dialog.credentials()
         try:
-            save_credentials(client_id, secret)
+            save_credentials(client_id, client_secret)
         except Exception as exc:
             QMessageBox.critical(
                 self,
                 APP_NAME,
                 f"Could not save credentials in Windows Credential Manager:\n\n{exc}",
             )
-            return
-        self._update_credentials_status()
-        self.status_label.setText("eBay API credentials saved securely.")
+            return None
+        self.status_label.setText("eBay credentials updated.")
+        return client_id, client_secret
+
+    def _credentials_for_scan(self) -> tuple[str, str] | None:
+        client_id, client_secret = load_credentials(self.config)
+        if client_id and client_secret:
+            return client_id, client_secret
+        return self._edit_credentials()
 
     def _start_scan(self) -> None:
         if self.thread and self.thread.isRunning():
             return
-        input_file = Path(self.input_path.text().strip()).expanduser()
-        client_id = self.client_id_input.text().strip()
-        client_secret = self.client_secret_input.text().strip()
-        if not client_id or not client_secret:
-            QMessageBox.warning(self, APP_NAME, "Enter your eBay API credentials first.")
+
+        input_file = self._resolved_input_path()
+        credentials = self._credentials_for_scan()
+        if credentials is None:
             return
+        client_id, client_secret = credentials
+
         if not input_file.exists():
             QMessageBox.warning(self, APP_NAME, f"Input file not found:\n{input_file}")
             return
+        if input_file.suffix.lower() != ".csv":
+            QMessageBox.warning(self, APP_NAME, "The input file must be a CSV file.")
+            return
 
-        self.settings["input_file"] = str(input_file)
+        raw_input = self.input_path.text().strip() or str(self.config.get("input_csv", "masterlist.csv"))
+        self.settings["input_file"] = raw_input
         self.settings["include_shipping"] = self.shipping_toggle.isChecked()
         save_settings(self.settings)
 
@@ -438,8 +492,10 @@ class MainWindow(QMainWindow):
         self.elapsed_timer.start()
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setFormat("Connecting to eBay…")
-        self.status_label.setText("Starting scan…")
-        self.summary_box.setPlainText("Scanning in progress. The formatted workbook will be written when the scan completes.")
+        self.status_label.setText(f"Starting scan of {input_file.name}…")
+        self.summary_box.setPlainText(
+            "Scanning in progress. Request details and the output path will appear here when complete."
+        )
         self.processed_value.setText("0")
         self.found_value.setText("0")
         self.api_value.setText("0")
@@ -448,9 +504,6 @@ class MainWindow(QMainWindow):
         self.cancel_button.setVisible(True)
         self.browse_button.setEnabled(False)
         self.shipping_toggle.setEnabled(False)
-        self.client_id_input.setEnabled(False)
-        self.client_secret_input.setEnabled(False)
-        self.save_credentials_button.setEnabled(False)
         self.open_file_button.setEnabled(False)
 
     def _cancel_scan(self) -> None:
@@ -469,6 +522,23 @@ class MainWindow(QMainWindow):
         self.api_value.setText(str(info.api_calls))
         self.status_label.setText(f"{info.status}: {info.current_identifier}")
 
+    @staticmethod
+    def _request_breakdown_lines(summary: RunSummary) -> list[str]:
+        breakdown = summary.api_call_breakdown
+        primary = breakdown.get("primary_search", 0)
+        fallback = breakdown.get("fallback_search", 0)
+        shipping = breakdown.get("shipping_detail", 0)
+        other = max(0, summary.api_calls - primary - fallback - shipping)
+        lines = [
+            f"  Primary search requests: {primary}",
+            f"  Fallback search requests after no primary match: {fallback}",
+        ]
+        if shipping or summary.api_calls:
+            lines.append(f"  Shipping-detail requests: {shipping}")
+        if other:
+            lines.append(f"  Other requests: {other}")
+        return lines
+
     @Slot(object)
     def _on_completed(self, summary: RunSummary) -> None:
         self.last_output = summary.output_file
@@ -478,24 +548,49 @@ class MainWindow(QMainWindow):
         self.processed_value.setText(str(summary.total_identifiers))
         self.found_value.setText(str(summary.found))
         self.api_value.setText(str(summary.api_calls))
-        self.remaining_value.setText(
-            str(summary.quota.remaining) if summary.quota.remaining is not None else "Unavailable"
+
+        quota_is_stale = (
+            summary.api_calls > 0
+            and summary.quota.used == 0
+            and summary.quota.limit is not None
+            and summary.quota.remaining == summary.quota.limit
         )
+        if summary.quota.remaining is None:
+            self.remaining_value.setText("Unavailable")
+        else:
+            suffix = "*" if quota_is_stale else ""
+            self.remaining_value.setText(f"{summary.quota.remaining:,}{suffix}")
+
         lines = [
-            f"Processed {summary.total_identifiers} identifiers ({summary.unique_identifiers} unique).",
-            f"Listings found: {summary.found}",
+            f"Processed: {summary.total_identifiers} ({summary.unique_identifiers} unique)",
+            f"Matches found: {summary.found}",
             f"No match: {summary.no_match}",
             f"Failed: {summary.failed}",
-            f"API calls made this run: {summary.api_calls}",
+            "",
+            f"eBay lookup requests made by this run: {summary.api_calls}",
+            *self._request_breakdown_lines(summary),
+            "",
             f"Elapsed time: {self._format_elapsed(summary.elapsed_seconds)}",
         ]
-        if summary.quota.limit is not None and summary.quota.used is not None:
-            lines.append(f"API calls used: {summary.quota.used} out of {summary.quota.limit}")
+
         if summary.quota.remaining is not None:
-            lines.append(f"Remaining calls: {summary.quota.remaining}")
+            if summary.quota.limit is not None:
+                lines.append(
+                    f"eBay-reported daily quota: {summary.quota.remaining:,} of "
+                    f"{summary.quota.limit:,} remaining"
+                )
+            else:
+                lines.append(f"eBay-reported daily quota remaining: {summary.quota.remaining:,}")
+            if quota_is_stale:
+                lines.append(
+                    "* eBay's quota report has not updated yet. The run total above is the accurate count for this scan."
+                )
+        else:
+            lines.append("eBay-reported daily quota: unavailable")
         if summary.quota.reset_at:
-            lines.append(f"Quota resets at: {summary.quota.reset_at} UTC")
-        lines.append(f"Results saved to: {summary.output_file}")
+            lines.append(f"Quota reset reported by eBay: {summary.quota.reset_at}")
+        lines.extend(("", f"Results saved to: {summary.output_file}"))
+
         self.summary_box.setPlainText("\n".join(lines))
         self.status_label.setText("Scan complete.")
         self.open_file_button.setEnabled(True)
@@ -513,6 +608,8 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("Failed")
         self.status_label.setText("Scan failed.")
+        if "credential" in message.casefold():
+            message += "\n\nUse the tray icon's ‘Update eBay credentials…’ command to replace them."
         self.summary_box.setPlainText(message)
 
     @Slot()
@@ -532,9 +629,6 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(True)
         self.browse_button.setEnabled(True)
         self.shipping_toggle.setEnabled(True)
-        self.client_id_input.setEnabled(True)
-        self.client_secret_input.setEnabled(True)
-        self.save_credentials_button.setEnabled(True)
         if self.worker:
             self.worker.deleteLater()
         if self.thread:
@@ -561,7 +655,11 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.last_output)))
 
     def _open_output_folder(self) -> None:
-        output = self.last_output.parent if self.last_output else resolve_path(str(self.config.get("output_dir", "output")))
+        output = (
+            self.last_output.parent
+            if self.last_output
+            else resolve_path(str(self.config.get("output_dir", "output")))
+        )
         output.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(output)))
 
