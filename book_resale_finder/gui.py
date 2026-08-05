@@ -282,8 +282,8 @@ class MainWindow(QMainWindow):
             "The total requests made by this scan: first searches, second searches after no result, and optional shipping checks.",
         )
         remaining_frame, self.remaining_value = self._stat(
-            "Daily requests remaining",
-            "The remaining daily quota reported by eBay. This separate counter can update later than the scan total.",
+            "Daily searches remaining",
+            "The remaining daily quota for eBay Browse searches. Item-detail calls use a separate quota.",
         )
         stats.addWidget(processed_frame, 0, 0)
         stats.addWidget(found_frame, 0, 1)
@@ -525,6 +525,22 @@ class MainWindow(QMainWindow):
         self.api_value.setText(str(info.api_calls))
         self.status_label.setText(f"{info.status}: {info.current_identifier}")
 
+    @staticmethod
+    def _format_request_usage(summary: RunSummary) -> str:
+        first = summary.api_call_breakdown.get("primary_search", 0)
+        second = summary.api_call_breakdown.get("fallback_search", 0)
+        shipping = summary.api_call_breakdown.get("shipping_detail", 0)
+        known = first + second + shipping
+        if not summary.api_call_breakdown or known != summary.api_calls:
+            return f"eBay requests used: {summary.api_calls:,}"
+
+        parts = [f"{first:,} first searches"]
+        if second:
+            parts.append(f"{second:,} second searches")
+        if shipping:
+            parts.append(f"{shipping:,} shipping checks")
+        return f"eBay requests used: {summary.api_calls:,} ({' + '.join(parts)})"
+
     @Slot(object)
     def _on_completed(self, summary: RunSummary) -> None:
         self.last_output = summary.output_file
@@ -533,10 +549,14 @@ class MainWindow(QMainWindow):
         self.progress_bar.setFormat("Complete")
         self.processed_value.setText(str(summary.total_identifiers))
         self.found_value.setText(str(summary.found))
-        self.api_value.setText(str(summary.api_calls))
+        self.api_value.setText(f"{summary.api_calls:,}")
 
+        search_calls = (
+            summary.api_call_breakdown.get("primary_search", 0)
+            + summary.api_call_breakdown.get("fallback_search", 0)
+        )
         quota_is_stale = (
-            summary.api_calls > 0
+            search_calls > 0
             and summary.quota.used == 0
             and summary.quota.limit is not None
             and summary.quota.remaining == summary.quota.limit
@@ -552,27 +572,27 @@ class MainWindow(QMainWindow):
             f"Matches found: {summary.found}",
             f"No match: {summary.no_match}",
             f"Failed: {summary.failed}",
-            f"eBay requests used: {summary.api_calls}",
+            self._format_request_usage(summary),
             f"Elapsed time: {self._format_elapsed(summary.elapsed_seconds)}",
         ]
 
         if summary.quota.remaining is not None:
             if summary.quota.limit is not None:
                 quota_line = (
-                    f"Daily eBay quota remaining: {summary.quota.remaining:,} of "
+                    f"Daily eBay search quota remaining: {summary.quota.remaining:,} of "
                     f"{summary.quota.limit:,}"
                 )
             else:
-                quota_line = f"Daily eBay quota remaining: {summary.quota.remaining:,}"
+                quota_line = f"Daily eBay search quota remaining: {summary.quota.remaining:,}"
             if quota_is_stale:
                 quota_line += " *"
             lines.append(quota_line)
         else:
-            lines.append("Daily eBay quota remaining: unavailable")
+            lines.append("Daily eBay search quota remaining: unavailable")
         if summary.quota.reset_at:
             lines.append(f"Quota reset: {self._format_quota_reset(summary.quota.reset_at)}")
         if quota_is_stale:
-            lines.append("* eBay quota reporting may be delayed.")
+            lines.append("* eBay search-quota reporting may be delayed.")
         lines.extend(("", f"Results saved to: {summary.output_file}"))
 
         self.summary_box.setPlainText("\n".join(lines))

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.4
+
+- Fixed the quota display to select eBay's `item_summary` search quota instead of the unused item-detail quota.
+- Renamed the quota output to make clear that it applies to Browse searches.
+- Added a compact per-run breakdown such as `1,706 first searches + 1,348 second searches`.
+
 ## 1.1.3
 
 - Convert eBay's UTC quota-reset timestamp to the user's local system time.
