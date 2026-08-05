@@ -32,6 +32,16 @@ class SearchResult:
     note: str = ""
 
     def to_output_row(self) -> list[Any]:
+        """Return the five-column user-facing row.
+
+        The original lookup workflow kept the identifier in place but left
+        result cells empty when a listing could not be returned. Preserve
+        that behavior so spreadsheet filters and formulas never have to
+        special-case status strings such as "No match", "Lookup failed", or
+        "Skipped".
+        """
+        if self.best_price is None:
+            return [self.asin, "", None, "", ""]
         return [self.asin, self.title, self.best_price, self.condition, self.listing_url]
 
 
