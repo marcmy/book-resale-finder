@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.6
+
+- Restored the original tool's spreadsheet-compatible behavior for unavailable results.
+- No-match, failed, skipped, and quota-stopped rows retain the ASIN in column A while leaving Title, Best Price, Condition, and Listing URL blank.
+- Applied the same clean blank-cell behavior to both CSV and XLSX output so status text cannot break filters or formulas.
+- Added regression tests covering no-match, API-error, and quota-skipped rows in both formats.
+
 ## 1.1.5
 
 - Kept the broader unmatched-ISBN retry enabled by default because it recovered most matches in the 1,706-book test.
