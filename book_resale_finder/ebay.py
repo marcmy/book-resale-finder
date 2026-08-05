@@ -27,6 +27,13 @@ class EbayApiError(RuntimeError):
     pass
 
 
+class EbayQuotaSafetyError(EbayApiError):
+    def __init__(self, category: str) -> None:
+        self.category = category
+        label = "search" if category == "search" else "item-detail"
+        super().__init__(f"Stopped before the reserved eBay {label} quota would be used.")
+
+
 @dataclass(slots=True)
 class _Candidate:
     item_id: str
@@ -58,6 +65,8 @@ class EbayClient:
         self.api_call_breakdown: Counter[str] = Counter()
         self.token: str | None = None
         self._http: httpx.AsyncClient | None = None
+        self._call_budgets: dict[str, int | None] = {"search": None, "item": None}
+        self._call_lock = asyncio.Lock()
 
     async def __aenter__(self) -> "EbayClient":
         timeout = float(self.config.get("request_timeout_seconds", 30))
@@ -80,11 +89,49 @@ class EbayClient:
             raise RuntimeError("EbayClient must be used as an async context manager.")
         return self._http
 
-    def _count_api_call(self, call_kind: str) -> None:
-        self.api_calls += 1
-        self.api_call_breakdown[call_kind] += 1
-        if self.on_api_call:
-            self.on_api_call(self.api_calls)
+    @property
+    def search_calls(self) -> int:
+        return self.api_call_breakdown.get("primary_search", 0) + self.api_call_breakdown.get(
+            "fallback_search", 0
+        )
+
+    @property
+    def item_detail_calls(self) -> int:
+        return self.api_call_breakdown.get("shipping_detail", 0)
+
+    @staticmethod
+    def _call_category(call_kind: str) -> str:
+        return "item" if call_kind == "shipping_detail" else "search"
+
+    def configure_quota_safety(
+        self,
+        search_quota: QuotaInfo,
+        item_quota: QuotaInfo,
+        reserve: int,
+    ) -> None:
+        reserve = max(0, int(reserve))
+        self._call_budgets["search"] = (
+            max(0, search_quota.remaining - reserve)
+            if search_quota.remaining is not None
+            else None
+        )
+        self._call_budgets["item"] = (
+            max(0, item_quota.remaining - reserve)
+            if item_quota.remaining is not None
+            else None
+        )
+
+    async def _claim_api_call(self, call_kind: str) -> None:
+        category = self._call_category(call_kind)
+        async with self._call_lock:
+            used = self.item_detail_calls if category == "item" else self.search_calls
+            budget = self._call_budgets[category]
+            if budget is not None and used >= budget:
+                raise EbayQuotaSafetyError(category)
+            self.api_calls += 1
+            self.api_call_breakdown[call_kind] += 1
+            if self.on_api_call:
+                self.on_api_call(self.api_calls)
 
     async def _fetch_token(self) -> str:
         credentials = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
@@ -138,7 +185,7 @@ class EbayClient:
         for attempt in range(self.max_retries + 1):
             await self.rate_limiter.acquire()
             if count_as_api_call:
-                self._count_api_call(call_kind)
+                await self._claim_api_call(call_kind)
             response = await self.http.request(method, url, headers=self._headers(), params=params)
 
             if response.status_code == 401 and attempt == 0:
@@ -263,11 +310,17 @@ class EbayClient:
         identifier: NormalizedIdentifier,
         *,
         include_shipping: bool,
+        retry_unmatched: bool | None = None,
     ) -> SearchResult:
         output_asin = identifier.original
         price_limit = max(1, int(self.config.get("price_item_limit", 10)))
         shipping_limit = max(1, int(self.config.get("shipping_item_limit", 3)))
         search_limit = shipping_limit if include_shipping else price_limit
+        should_retry = (
+            bool(self.config.get("fallback_to_search", True))
+            if retry_unmatched is None
+            else bool(retry_unmatched)
+        )
 
         candidates: list[_Candidate] = []
         method = ""
@@ -278,7 +331,7 @@ class EbayClient:
                 call_kind="primary_search",
             )
             method = "GTIN"
-            if not candidates and bool(self.config.get("fallback_to_search", True)):
+            if not candidates and should_retry:
                 candidates = await self._search(
                     query=identifier.isbn13,
                     limit=search_limit,
@@ -320,14 +373,20 @@ class EbayClient:
         semaphore = asyncio.Semaphore(min(shipping_limit, 5))
 
         async def total_for(candidate: _Candidate) -> tuple[float, _Candidate, float | None]:
-            async with semaphore:
-                shipping = await self._shipping_cost(candidate)
+            if candidate.summary_shipping is not None:
+                shipping = candidate.summary_shipping
+            else:
+                async with semaphore:
+                    shipping = await self._shipping_cost(candidate)
             return candidate.item_price + (shipping or 0.0), candidate, shipping
 
         totals = await asyncio.gather(
             *(total_for(candidate) for candidate in candidates[:shipping_limit]),
             return_exceptions=True,
         )
+        quota_errors = [result for result in totals if isinstance(result, EbayQuotaSafetyError)]
+        if quota_errors:
+            raise quota_errors[0]
         valid: list[tuple[float, _Candidate, float | None]] = [
             result for result in totals if isinstance(result, tuple)
         ]
@@ -361,39 +420,10 @@ class EbayClient:
         )
 
     @staticmethod
-    def _quota_from_payload(payload: dict[str, Any]) -> QuotaInfo:
-        """Return the Browse item_summary/search quota, never the item-detail quota."""
-        ranked_resources: list[tuple[int, dict[str, Any]]] = []
-        for group in payload.get("rateLimits") or []:
-            api_name = str(group.get("apiName") or "").casefold()
-            api_context = str(group.get("apiContext") or "").casefold()
-            if api_name and api_name != "browse":
-                continue
-            if api_context and api_context != "buy":
-                continue
-
-            for resource in group.get("resources") or []:
-                raw_name = str(resource.get("name") or "")
-                normalized = re.sub(r"[^a-z0-9]+", "_", raw_name.casefold()).strip("_")
-                if normalized == "item_summary":
-                    score = 100
-                elif "item_summary" in normalized:
-                    score = 90
-                elif normalized == "search":
-                    score = 80
-                elif "search" in normalized:
-                    score = 70
-                else:
-                    continue
-                ranked_resources.append((score, resource))
-
-        if not ranked_resources:
-            return QuotaInfo()
-
-        resource = max(ranked_resources, key=lambda entry: entry[0])[1]
+    def _daily_rate(resource: dict[str, Any]) -> dict[str, Any] | None:
         rates = resource.get("rates") or []
         if not rates:
-            return QuotaInfo()
+            return None
 
         def time_window(rate: dict[str, Any]) -> int | None:
             try:
@@ -401,7 +431,13 @@ class EbayClient:
             except (TypeError, ValueError):
                 return None
 
-        rate = next((candidate for candidate in rates if time_window(candidate) == 86400), rates[0])
+        return next((candidate for candidate in rates if time_window(candidate) == 86400), rates[0])
+
+    @classmethod
+    def _quota_for_resource(cls, resource: dict[str, Any], name: str) -> QuotaInfo:
+        rate = cls._daily_rate(resource)
+        if not rate:
+            return QuotaInfo(resource=name)
         try:
             limit = int(rate.get("limit")) if rate.get("limit") is not None else None
             remaining = int(rate.get("remaining")) if rate.get("remaining") is not None else None
@@ -411,15 +447,50 @@ class EbayClient:
                 used = limit - remaining if limit is not None and remaining is not None else None
         except (TypeError, ValueError):
             limit = used = remaining = None
-
         return QuotaInfo(
             limit=limit,
             used=used,
             remaining=remaining,
             reset_at=str(rate.get("reset") or "") or None,
+            resource=name,
         )
 
-    async def fetch_quota(self) -> QuotaInfo:
+    @classmethod
+    def _quotas_from_payload(cls, payload: dict[str, Any]) -> tuple[QuotaInfo, QuotaInfo]:
+        search_resource: dict[str, Any] | None = None
+        item_resource: dict[str, Any] | None = None
+        for group in payload.get("rateLimits") or []:
+            api_name = str(group.get("apiName") or "").casefold()
+            api_context = str(group.get("apiContext") or "").casefold()
+            if api_name and api_name != "browse":
+                continue
+            if api_context and api_context != "buy":
+                continue
+            for resource in group.get("resources") or []:
+                raw_name = str(resource.get("name") or "")
+                normalized = re.sub(r"[^a-z0-9]+", "_", raw_name.casefold()).strip("_")
+                if normalized == "item_summary" or "item_summary" in normalized:
+                    search_resource = resource
+                elif normalized == "item":
+                    item_resource = resource
+
+        search = (
+            cls._quota_for_resource(search_resource, "item_summary")
+            if search_resource
+            else QuotaInfo(resource="item_summary")
+        )
+        item = (
+            cls._quota_for_resource(item_resource, "item")
+            if item_resource
+            else QuotaInfo(resource="item")
+        )
+        return search, item
+
+    @classmethod
+    def _quota_from_payload(cls, payload: dict[str, Any]) -> QuotaInfo:
+        return cls._quotas_from_payload(payload)[0]
+
+    async def fetch_quotas(self) -> tuple[QuotaInfo, QuotaInfo]:
         try:
             payload = await self._request_json(
                 "GET",
@@ -428,5 +499,8 @@ class EbayClient:
                 count_as_api_call=False,
             )
         except Exception:
-            return QuotaInfo()
-        return self._quota_from_payload(payload)
+            return QuotaInfo(resource="item_summary"), QuotaInfo(resource="item")
+        return self._quotas_from_payload(payload)
+
+    async def fetch_quota(self) -> QuotaInfo:
+        return (await self.fetch_quotas())[0]
