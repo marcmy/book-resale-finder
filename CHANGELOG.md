@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.2
+
+- Removed the repeated API-request tutorial from every completed scan.
+- Kept the useful run results: processed, matches, no matches, failures, requests used, elapsed time, daily quota, reset time, and output path.
+- Retained only a short note when eBay's separate quota report appears delayed.
+
 ## 1.1.1
 
 - Fixed a double theme guard that prevented every stylesheet from being applied in v1.1.0.
