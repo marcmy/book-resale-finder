@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.3
+
+- Convert eBay's UTC quota-reset timestamp to the user's local system time.
+- Display the reset as `MM-DD-YYYY h:mm AM/PM` instead of raw ISO 8601.
+
 ## 1.1.2
 
 - Removed the repeated API-request tutorial from every completed scan.
