@@ -8,6 +8,7 @@ A desktop eBay price finder for Keepa-style book lists. It reads a CSV containin
 - The input column is `ASIN` (case-insensitive).
 - Output columns are `ASIN`, `Title`, `Best Price`, `Condition`, and `Listing URL`.
 - CSV is the default output and contains plain values for compatibility with existing spreadsheet formulas.
+- When no usable listing is returned, the ASIN remains in column A and all result cells remain blank. No status phrases are inserted into CSV or XLSX cells.
 - XLSX remains available with requested column widths, currency formatting, and clickable ASIN/listing links. Both formats can be created in one scan.
 - The recommended search mode performs a structured ISBN search and retries unmatched ISBNs with a broader keyword search. The retry can be disabled to reproduce the original tool's one-search-per-book behavior.
 - The GUI estimates minimum and maximum API calls before a scan starts.
@@ -45,6 +46,8 @@ The app retrieves the search and item-detail quotas separately. If eBay's analyt
 - **CSV:** plain values with no currency styling or embedded hyperlinks; best for existing formulas and workflows.
 - **XLSX:** formatted columns, currency display, and clickable links.
 - **Both:** produces matching CSV and XLSX files from the same results.
+
+For both formats, unavailable results preserve row alignment by retaining the ASIN while leaving Title, Best Price, Condition, and Listing URL empty. The GUI completion summary still reports no-match, failed, skipped, and quota-stop counts separately.
 
 ## eBay credentials
 
