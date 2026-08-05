@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -16,6 +17,7 @@ _REQUESTED_WIDTH_INCHES = {
     "D": 1.5,
     "E": 8.0,
 }
+_EBAY_SEARCH_URL = "https://www.ebay.com/sch/i.html?_nkw={query}"
 
 
 def inches_to_excel_width(inches: float, dpi: int = 96) -> float:
@@ -24,6 +26,10 @@ def inches_to_excel_width(inches: float, dpi: int = 96) -> float:
     if pixels <= 12:
         return pixels / 12
     return (pixels - 5) / 7
+
+
+def ebay_search_url(identifier: object) -> str:
+    return _EBAY_SEARCH_URL.format(query=quote_plus(str(identifier or "").strip()))
 
 
 def write_results_xlsx(results: list[SearchResult], output_path: Path) -> None:
@@ -52,6 +58,9 @@ def write_results_xlsx(results: list[SearchResult], output_path: Path) -> None:
             cell.border = body_border
             cell.alignment = Alignment(vertical="top")
         row[0].number_format = "@"
+        if row[0].value:
+            row[0].hyperlink = ebay_search_url(row[0].value)
+            row[0].style = "Hyperlink"
         row[1].alignment = Alignment(vertical="top", wrap_text=True)
         row[2].number_format = '$0.00'
         row[2].alignment = Alignment(horizontal="right", vertical="top")

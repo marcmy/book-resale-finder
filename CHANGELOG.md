@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0
+
+- Removed the always-visible eBay credential fields from the main window; missing credentials are requested in a dedicated dialog and stored in Windows Credential Manager.
+- Fixed clipped statistic labels and values by giving the cards reliable minimum sizing.
+- Removed the explanatory subtitle and redundant input/output footer text.
+- Added clickable ASIN cells that open general eBay searches for competing offers.
+- Added an exact request breakdown for primary searches, fallback searches, and shipping-detail requests.
+- Clarified that eBay's separately reported daily quota can lag behind the live per-run request count.
+- Made relative input filenames such as `list.csv` resolve beside the executable.
+- Added the Trivy and Syft supply-chain audit workflow used by Book Resale Calculator.
+
 ## 1.0.1
 
 - Changed the Windows package from PyInstaller one-file to the more reliable onedir layout.

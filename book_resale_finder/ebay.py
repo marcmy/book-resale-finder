@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -53,6 +54,7 @@ class EbayClient:
         self.rate_limiter = AsyncRateLimiter(float(config.get("rate_limit_per_second", 5)))
         self.on_api_call = on_api_call
         self.api_calls = 0
+        self.api_call_breakdown: Counter[str] = Counter()
         self.token: str | None = None
         self._http: httpx.AsyncClient | None = None
 
@@ -77,8 +79,9 @@ class EbayClient:
             raise RuntimeError("EbayClient must be used as an async context manager.")
         return self._http
 
-    def _count_api_call(self) -> None:
+    def _count_api_call(self, call_kind: str) -> None:
         self.api_calls += 1
+        self.api_call_breakdown[call_kind] += 1
         if self.on_api_call:
             self.on_api_call(self.api_calls)
 
@@ -128,12 +131,13 @@ class EbayClient:
         *,
         params: dict[str, Any] | None = None,
         count_as_api_call: bool = True,
+        call_kind: str = "other",
     ) -> dict[str, Any]:
         backoff = 1.0
         for attempt in range(self.max_retries + 1):
             await self.rate_limiter.acquire()
             if count_as_api_call:
-                self._count_api_call()
+                self._count_api_call(call_kind)
             response = await self.http.request(method, url, headers=self._headers(), params=params)
 
             if response.status_code == 401 and attempt == 0:
@@ -175,7 +179,14 @@ class EbayClient:
             parts.append(f"buyingOptions:{{{'|'.join(buying_options)}}}")
         return ",".join(parts)
 
-    async def _search(self, *, gtin: str | None = None, query: str | None = None, limit: int) -> list[_Candidate]:
+    async def _search(
+        self,
+        *,
+        gtin: str | None = None,
+        query: str | None = None,
+        limit: int,
+        call_kind: str = "primary_search",
+    ) -> list[_Candidate]:
         params: dict[str, Any] = {
             "sort": "price",
             "limit": max(1, min(int(limit), 200)),
@@ -190,7 +201,12 @@ class EbayClient:
         else:
             return []
 
-        payload = await self._request_json("GET", BROWSE_SEARCH_URL, params=params)
+        payload = await self._request_json(
+            "GET",
+            BROWSE_SEARCH_URL,
+            params=params,
+            call_kind=call_kind,
+        )
         candidates: list[_Candidate] = []
         for item in payload.get("itemSummaries") or []:
             try:
@@ -229,6 +245,7 @@ class EbayClient:
             "GET",
             BROWSE_ITEM_URL.format(item_id=item_id),
             params={"fieldgroups": "COMPACT"},
+            call_kind="shipping_detail",
         )
         costs: list[float] = []
         for option in payload.get("shippingOptions") or []:
@@ -254,14 +271,26 @@ class EbayClient:
         candidates: list[_Candidate] = []
         method = ""
         if identifier.isbn13:
-            candidates = await self._search(gtin=identifier.isbn13, limit=search_limit)
+            candidates = await self._search(
+                gtin=identifier.isbn13,
+                limit=search_limit,
+                call_kind="primary_search",
+            )
             method = "GTIN"
             if not candidates and bool(self.config.get("fallback_to_search", True)):
-                candidates = await self._search(query=identifier.isbn13, limit=search_limit)
+                candidates = await self._search(
+                    query=identifier.isbn13,
+                    limit=search_limit,
+                    call_kind="fallback_search",
+                )
                 method = "keyword fallback"
         else:
             search_term = identifier.asin or identifier.query or identifier.original
-            candidates = await self._search(query=search_term, limit=search_limit)
+            candidates = await self._search(
+                query=search_term,
+                limit=search_limit,
+                call_kind="primary_search",
+            )
             method = "keyword"
 
         if not candidates:

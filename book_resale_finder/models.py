@@ -71,4 +71,5 @@ class RunSummary:
     elapsed_seconds: float
     output_file: Path
     quota: QuotaInfo = field(default_factory=QuotaInfo)
+    api_call_breakdown: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
