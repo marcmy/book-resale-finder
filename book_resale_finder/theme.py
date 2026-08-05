@@ -33,7 +33,7 @@ DARK = {
 
 def stylesheet(theme: dict[str, str]) -> str:
     return f"""
-    QMainWindow, QWidget#root {{
+    QMainWindow, QWidget#root, QDialog, QMessageBox, QMenu {{
         background: {theme['bg']};
         color: {theme['text']};
         font-family: "Segoe UI";
@@ -104,5 +104,7 @@ def stylesheet(theme: dict[str, str]) -> str:
         border-radius: 8px;
         padding: 8px;
     }}
+    QMenu::item {{ padding: 7px 24px; }}
+    QMenu::item:selected {{ background: {theme['stat']}; }}
     QToolTip {{ background: {theme['panel']}; color: {theme['text']}; border: 1px solid {theme['line']}; }}
     """
