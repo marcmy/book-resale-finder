@@ -67,6 +67,7 @@ async def run_scan(
     semaphore = asyncio.Semaphore(max_workers)
     completion_lock = asyncio.Lock()
     quota_stop: EbayQuotaSafetyError | None = None
+    quota_diagnostics: list[str] = []
 
     def is_cancelled() -> bool:
         return bool(cancel_requested and cancel_requested())
@@ -157,6 +158,7 @@ async def run_scan(
         api_call_breakdown = dict(ebay.api_call_breakdown)
         search_calls = ebay.search_calls
         item_detail_calls = ebay.item_detail_calls
+        quota_diagnostics = list(getattr(ebay, "quota_diagnostics", []))
 
     skipped = 0
     if quota_stop:
@@ -195,6 +197,8 @@ async def run_scan(
     warnings: list[str] = []
     if search_quota.estimated or item_quota.estimated:
         warnings.append("eBay quota reporting had not caught up; remaining values were adjusted locally.")
+    if search_quota.remaining is None or (include_shipping and item_quota.remaining is None):
+        warnings.extend(message for message in quota_diagnostics if message not in warnings)
     if quota_stop:
         warnings.append(str(quota_stop))
 
