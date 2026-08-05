@@ -90,6 +90,8 @@ class CredentialsDialog(QDialog):
         self.setWindowTitle("eBay API credentials")
         self.setModal(True)
         self.setMinimumWidth(470)
+        if parent is not None:
+            self.setStyleSheet(parent.styleSheet())
 
         layout = QVBoxLayout(self)
         explanation = QLabel(
@@ -275,12 +277,12 @@ class MainWindow(QMainWindow):
             "Identifiers for which at least one eligible eBay listing was found.",
         )
         api_frame, self.api_value = self._stat(
-            "eBay lookup requests",
-            "Search and listing-detail requests sent by this scan, including fallbacks and optional shipping lookups.",
+            "eBay requests used",
+            "The total requests made by this scan: first searches, second searches after no result, and optional shipping checks.",
         )
         remaining_frame, self.remaining_value = self._stat(
-            "eBay quota remaining",
-            "The daily remaining quota reported by eBay. This service can update later than the live run counter.",
+            "Daily requests remaining",
+            "The remaining daily quota reported by eBay. This separate counter can update later than the scan total.",
         )
         stats.addWidget(processed_frame, 0, 0)
         stats.addWidget(found_frame, 0, 1)
@@ -525,18 +527,20 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _request_breakdown_lines(summary: RunSummary) -> list[str]:
         breakdown = summary.api_call_breakdown
-        primary = breakdown.get("primary_search", 0)
-        fallback = breakdown.get("fallback_search", 0)
-        shipping = breakdown.get("shipping_detail", 0)
-        other = max(0, summary.api_calls - primary - fallback - shipping)
+        first_searches = breakdown.get("primary_search", 0)
+        second_searches = breakdown.get("fallback_search", 0)
+        shipping_checks = breakdown.get("shipping_detail", 0)
+        other = max(0, summary.api_calls - first_searches - second_searches - shipping_checks)
+
         lines = [
-            f"  Primary search requests: {primary}",
-            f"  Fallback search requests after no primary match: {fallback}",
+            "How that total was calculated:",
+            f"  {first_searches} first searches — normally one for each unique book",
+            f"+ {second_searches} second searches — only when the first search found nothing",
+            f"+ {shipping_checks} shipping checks — only when shipping comparison is enabled",
         ]
-        if shipping or summary.api_calls:
-            lines.append(f"  Shipping-detail requests: {shipping}")
         if other:
-            lines.append(f"  Other requests: {other}")
+            lines.append(f"+ {other} repeated/other requests")
+        lines.append(f"= {summary.api_calls} total requests")
         return lines
 
     @Slot(object)
@@ -567,7 +571,6 @@ class MainWindow(QMainWindow):
             f"No match: {summary.no_match}",
             f"Failed: {summary.failed}",
             "",
-            f"eBay lookup requests made by this run: {summary.api_calls}",
             *self._request_breakdown_lines(summary),
             "",
             f"Elapsed time: {self._format_elapsed(summary.elapsed_seconds)}",
@@ -576,19 +579,18 @@ class MainWindow(QMainWindow):
         if summary.quota.remaining is not None:
             if summary.quota.limit is not None:
                 lines.append(
-                    f"eBay-reported daily quota: {summary.quota.remaining:,} of "
-                    f"{summary.quota.limit:,} remaining"
+                    f"eBay says {summary.quota.remaining:,} of {summary.quota.limit:,} daily requests remain."
                 )
             else:
-                lines.append(f"eBay-reported daily quota remaining: {summary.quota.remaining:,}")
+                lines.append(f"eBay says {summary.quota.remaining:,} daily requests remain.")
             if quota_is_stale:
                 lines.append(
-                    "* eBay's quota report has not updated yet. The run total above is the accurate count for this scan."
+                    "* eBay's daily counter has not caught up yet. It does not change the exact total shown above."
                 )
         else:
-            lines.append("eBay-reported daily quota: unavailable")
+            lines.append("eBay's separate daily-limit counter was unavailable.")
         if summary.quota.reset_at:
-            lines.append(f"Quota reset reported by eBay: {summary.quota.reset_at}")
+            lines.append(f"eBay says the daily limit resets at: {summary.quota.reset_at}")
         lines.extend(("", f"Results saved to: {summary.output_file}"))
 
         self.summary_box.setPlainText("\n".join(lines))
