@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.7
+
+- Fixed the six scan-stat cards hiding their values when the window was vertically compressed.
+- Replaced the two-line cards with compact one-line label/value rows that remain visible at supported window sizes.
+- Added a frozen-executable smoke test that fails if any scan-stat value is clipped or invisible.
+- Renamed `Keep unused quota` to `Stop with at least … calls remaining` and clarified that setting it to zero disables the safety buffer.
+
 ## 1.1.6
 
 - Restored the original tool's spreadsheet-compatible behavior for unavailable results.
