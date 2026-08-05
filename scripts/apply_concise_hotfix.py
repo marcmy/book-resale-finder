@@ -1,0 +1,96 @@
+from pathlib import Path
+
+
+gui_path = Path("book_resale_finder/gui.py")
+gui = gui_path.read_text(encoding="utf-8")
+
+method_start = gui.index("    @staticmethod\n    def _request_breakdown_lines")
+completed_start = gui.index("    @Slot(object)\n    def _on_completed", method_start)
+gui = gui[:method_start] + gui[completed_start:]
+
+completed_start = gui.index("    @Slot(object)\n    def _on_completed")
+lines_start = gui.index("        lines = [", completed_start)
+summary_set = gui.index("        self.summary_box.setPlainText", lines_start)
+
+concise = '''        lines = [
+            f"Processed: {summary.total_identifiers} ({summary.unique_identifiers} unique)",
+            f"Matches found: {summary.found}",
+            f"No match: {summary.no_match}",
+            f"Failed: {summary.failed}",
+            f"eBay requests used: {summary.api_calls}",
+            f"Elapsed time: {self._format_elapsed(summary.elapsed_seconds)}",
+        ]
+
+        if summary.quota.remaining is not None:
+            if summary.quota.limit is not None:
+                quota_line = (
+                    f"Daily eBay quota remaining: {summary.quota.remaining:,} of "
+                    f"{summary.quota.limit:,}"
+                )
+            else:
+                quota_line = f"Daily eBay quota remaining: {summary.quota.remaining:,}"
+            if quota_is_stale:
+                quota_line += " *"
+            lines.append(quota_line)
+        else:
+            lines.append("Daily eBay quota remaining: unavailable")
+        if summary.quota.reset_at:
+            lines.append(f"Quota reset: {summary.quota.reset_at}")
+        if quota_is_stale:
+            lines.append("* eBay quota reporting may be delayed.")
+        lines.extend(("", f"Results saved to: {summary.output_file}"))
+
+'''
+gui = gui[:lines_start] + concise + gui[summary_set:]
+gui_path.write_text(gui, encoding="utf-8")
+
+replacements = {
+    Path("book_resale_finder/constants.py"): ('VERSION = "1.1.1"', 'VERSION = "1.1.2"'),
+    Path("book_resale_finder/__init__.py"): ('__version__ = "1.1.1"', '__version__ = "1.1.2"'),
+    Path("pyproject.toml"): ('version = "1.1.1"', 'version = "1.1.2"'),
+}
+for path, (old, new) in replacements.items():
+    text = path.read_text(encoding="utf-8")
+    if old not in text:
+        raise RuntimeError(f"Expected version string not found in {path}")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+changelog = Path("CHANGELOG.md")
+text = changelog.read_text(encoding="utf-8")
+entry = '''# Changelog
+
+## 1.1.2
+
+- Removed the repeated API-request tutorial from every completed scan.
+- Kept the useful run results: processed, matches, no matches, failures, requests used, elapsed time, daily quota, reset time, and output path.
+- Retained only a short note when eBay's separate quota report appears delayed.
+
+'''
+if not text.startswith("# Changelog\n"):
+    raise RuntimeError("Unexpected changelog format")
+changelog.write_text(entry + text[len("# Changelog\n\n"):], encoding="utf-8")
+
+Path("tests/test_gui_presentation.py").write_text('''import inspect
+
+from book_resale_finder.gui import MainWindow
+from book_resale_finder.theme import DARK, LIGHT, stylesheet
+
+
+def test_light_and_dark_stylesheets_are_nonempty_and_different():
+    light = stylesheet(LIGHT)
+    dark = stylesheet(DARK)
+    assert light
+    assert dark
+    assert light != dark
+    assert "QDialog" in light
+    assert "QDialog" in dark
+
+
+def test_completion_output_keeps_results_without_repeating_tutorial():
+    source = inspect.getsource(MainWindow._on_completed)
+    assert "How that total was calculated" not in source
+    assert "first searches" not in source
+    assert "eBay requests used" in source
+    assert "Elapsed time" in source
+    assert "Results saved to" in source
+''', encoding="utf-8")
