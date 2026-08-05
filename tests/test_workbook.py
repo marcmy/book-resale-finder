@@ -39,6 +39,65 @@ def test_csv_output_is_plain_values(tmp_path: Path):
     ]
 
 
+def test_unavailable_results_keep_asin_and_leave_result_cells_blank(tmp_path: Path):
+    results = [
+        SearchResult(
+            asin="9780000000001",
+            title="No matching listing found",
+            condition="No match",
+            note="No active eBay listing matched this identifier.",
+        ),
+        SearchResult(
+            asin="9780000000002",
+            title="Lookup failed",
+            condition="Error",
+            note="Temporary API failure",
+        ),
+        SearchResult(
+            asin="9780000000003",
+            title="Not processed",
+            condition="Skipped",
+            note="Quota reserve reached",
+        ),
+    ]
+
+    csv_output = tmp_path / "results.csv"
+    write_results_csv(results, csv_output)
+    with csv_output.open("r", encoding="utf-8-sig", newline="") as handle:
+        csv_rows = list(csv.reader(handle))
+    assert csv_rows[1:] == [
+        ["9780000000001", "", "", "", ""],
+        ["9780000000002", "", "", "", ""],
+        ["9780000000003", "", "", "", ""],
+    ]
+
+    xlsx_output = tmp_path / "results.xlsx"
+    write_results_xlsx(results, xlsx_output)
+    workbook = load_workbook(xlsx_output)
+    sheet = workbook["Results"]
+    assert [sheet.cell(2, column).value for column in range(1, 6)] == [
+        "9780000000001",
+        None,
+        None,
+        None,
+        None,
+    ]
+    assert [sheet.cell(3, column).value for column in range(1, 6)] == [
+        "9780000000002",
+        None,
+        None,
+        None,
+        None,
+    ]
+    assert [sheet.cell(4, column).value for column in range(1, 6)] == [
+        "9780000000003",
+        None,
+        None,
+        None,
+        None,
+    ]
+
+
 def test_workbook_headers_widths_and_links(tmp_path: Path):
     output = tmp_path / "results.xlsx"
     write_results_xlsx(
