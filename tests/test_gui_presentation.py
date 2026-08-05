@@ -18,11 +18,12 @@ def test_light_and_dark_stylesheets_are_nonempty_and_different():
 
 
 def test_completion_output_keeps_results_without_repeating_tutorial():
-    completion_source = inspect.getsource(MainWindow._on_completed)
-    assert "How that total was calculated" not in completion_source
-    assert "Matches found" in completion_source
-    assert "Daily search quota remaining" in completion_source
-    assert "Results saved to" in completion_source
+    base_completion_source = inspect.getsource(MainWindow.__mro__[1]._on_completed)
+    wrapper_source = inspect.getsource(MainWindow._on_completed)
+    assert "How that total was calculated" not in base_completion_source
+    assert "Matches found" in base_completion_source
+    assert "Results saved to" in base_completion_source
+    assert "_remove_unavailable_quota_lines" in wrapper_source
 
 
 def test_stat_cards_keep_labels_and_values_on_one_line():
@@ -38,6 +39,22 @@ def test_quota_reserve_wording_describes_the_stop_threshold():
     assert 'label.setText("Stop with at least")' in build_source
     assert 'setSuffix(" calls remaining")' in build_source
     assert "disable the safety buffer" in build_source
+
+
+def test_unavailable_quota_lines_are_removed_instead_of_displayed():
+    original = "\n".join(
+        [
+            "Processed: 20 of 20",
+            "Daily search quota remaining: unavailable",
+            "Daily item-detail quota remaining: unavailable",
+            "",
+            "Result saved to: results.csv",
+        ]
+    )
+    cleaned = MainWindow._remove_unavailable_quota_lines(original)
+    assert "unavailable" not in cleaned.casefold()
+    assert "Processed: 20 of 20" in cleaned
+    assert "Result saved to: results.csv" in cleaned
 
 
 def test_quota_reset_is_converted_to_local_12_hour_time():
