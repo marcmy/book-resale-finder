@@ -32,13 +32,7 @@ class SearchResult:
     note: str = ""
 
     def to_output_row(self) -> list[Any]:
-        return [
-            self.asin,
-            self.title,
-            self.best_price,
-            self.condition,
-            self.listing_url,
-        ]
+        return [self.asin, self.title, self.best_price, self.condition, self.listing_url]
 
 
 @dataclass(slots=True)
@@ -47,6 +41,22 @@ class QuotaInfo:
     used: int | None = None
     remaining: int | None = None
     reset_at: str | None = None
+    resource: str = ""
+    estimated: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CallEstimate:
+    total_identifiers: int
+    unique_identifiers: int
+    isbn_identifiers: int
+    search_min: int
+    search_max: int
+    item_detail_max: int
+
+    @property
+    def total_max(self) -> int:
+        return self.search_max + self.item_detail_max
 
 
 @dataclass(slots=True)
@@ -58,6 +68,8 @@ class ProgressInfo:
     found: int
     failed: int
     status: str
+    search_calls: int = 0
+    item_detail_calls: int = 0
 
 
 @dataclass(slots=True)
@@ -71,5 +83,10 @@ class RunSummary:
     elapsed_seconds: float
     output_file: Path
     quota: QuotaInfo = field(default_factory=QuotaInfo)
+    item_quota: QuotaInfo = field(default_factory=QuotaInfo)
     api_call_breakdown: dict[str, int] = field(default_factory=dict)
+    output_files: list[Path] = field(default_factory=list)
+    skipped: int = 0
+    stopped_for_quota: bool = False
+    stop_reason: str = ""
     warnings: list[str] = field(default_factory=list)
