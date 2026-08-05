@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.10
+
+- Added sanitized diagnostics for eBay Developer Analytics quota requests.
+- Report exact HTTP failures, including 204 No Content, 4xx/5xx responses, empty bodies, invalid JSON, and network/client errors.
+- When eBay returns a successful but unrecognized quota payload, list only the API/context/resource names that were returned.
+- Redact the Client ID, Client Secret, OAuth token, and authorization values from all displayed diagnostics.
+- Keep scan results and API-call behavior unchanged; this release is intended to identify why the live quota value is missing.
+
 ## 1.1.9
 
 - Keep quota cards dedicated to quota data instead of relabeling them with unrelated scan statistics.
