@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -21,7 +22,6 @@ _EBAY_SEARCH_URL = "https://www.ebay.com/sch/i.html?_nkw={query}"
 
 
 def inches_to_excel_width(inches: float, dpi: int = 96) -> float:
-    """Approximate an inch width using Excel's character-based column units."""
     pixels = inches * dpi
     if pixels <= 12:
         return pixels / 12
@@ -30,6 +30,15 @@ def inches_to_excel_width(inches: float, dpi: int = 96) -> float:
 
 def ebay_search_url(identifier: object) -> str:
     return _EBAY_SEARCH_URL.format(query=quote_plus(str(identifier or "").strip()))
+
+
+def write_results_csv(results: list[SearchResult], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(_HEADERS)
+        for result in results:
+            writer.writerow(result.to_output_row())
 
 
 def write_results_xlsx(results: list[SearchResult], output_path: Path) -> None:
@@ -62,7 +71,7 @@ def write_results_xlsx(results: list[SearchResult], output_path: Path) -> None:
             row[0].hyperlink = ebay_search_url(row[0].value)
             row[0].style = "Hyperlink"
         row[1].alignment = Alignment(vertical="top", wrap_text=True)
-        row[2].number_format = '$0.00'
+        row[2].number_format = "$0.00"
         row[2].alignment = Alignment(horizontal="right", vertical="top")
         row[3].alignment = Alignment(vertical="top", wrap_text=True)
         row[4].alignment = Alignment(vertical="top", wrap_text=True)
