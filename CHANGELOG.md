@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.11
+
+- Fixed quota parsing for eBay's production resource names: `buy.browse` and `buy.browse.item.bulk`.
+- Treat search and item-detail shipping requests as consumers of one shared `buy.browse` daily quota.
+- Ignore the separate `buy.browse.item.bulk` quota because the app does not call the bulk `getItems` method.
+- Enforce the configured reserve against the combined total of search and item-detail calls.
+- Replace the separate search/item-detail quota cards with one **Browse quota remaining** card.
+- Reconcile locally adjusted remaining quota against every Browse call made during the run.
+
 ## 1.1.10
 
 - Added sanitized diagnostics for eBay Developer Analytics quota requests.
