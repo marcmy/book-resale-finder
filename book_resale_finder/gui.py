@@ -52,15 +52,27 @@ class MainWindow(_MainWindow):
     def _build_ui(self) -> None:
         super()._build_ui()
 
+        # The original 900-pixel window left a large amount of unused horizontal
+        # space. Keep the same two-column dashboard while using a more compact,
+        # tested default and minimum width.
+        self.resize(760, 760)
+        self.setMinimumSize(700, 680)
+        root_layout = self.centralWidget().layout()
+        if root_layout is not None:
+            root_layout.setContentsMargins(18, 16, 18, 16)
+
+        self.retry_toggle.setText("Retry unmatched ISBNs with a broader search (recommended)")
+        self.shipping_toggle.setText("Include shipping when choosing the best price")
+        self.output_format.setItemText(0, "CSV — best for existing formulas")
+        self.output_format.setItemText(1, "XLSX — formatted columns and links")
+        self.output_format.setItemText(2, "Both CSV and XLSX")
+
         for label in self.findChildren(QLabel):
             if label.text() == "Keep unused quota":
                 label.setText("Stop with at least")
             elif label.text() == "Search quota remaining":
                 label.setText("Browse quota remaining")
 
-        self.shipping_toggle.setText(
-            "Include shipping when choosing the best price (may use additional Browse API calls)"
-        )
         self.shipping_toggle.setToolTip(
             "Shipping already returned in search results is reused without another call. "
             "When it is missing, the app can make item-detail calls. Search and item-detail "
