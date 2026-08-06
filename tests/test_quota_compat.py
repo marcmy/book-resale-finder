@@ -1,8 +1,11 @@
 import asyncio
 
 import httpx
+import pytest
 
+from book_resale_finder.ebay import EbayQuotaSafetyError
 from book_resale_finder.ebay_v118 import EbayClient
+from book_resale_finder.models import QuotaInfo
 
 
 def _rate(limit: int, count: int) -> list[dict[str, int]]:
@@ -16,15 +19,15 @@ def _rate(limit: int, count: int) -> list[dict[str, int]]:
     ]
 
 
-def _quota_payload(search_count: int = 30, item_count: int = 0) -> dict:
+def _quota_payload(count: int = 30, bulk_count: int = 0) -> dict:
     return {
         "rateLimits": [
             {
                 "apiContext": "buy",
-                "apiName": "browse",
+                "apiName": "Browse",
                 "resources": [
-                    {"name": "search", "rates": _rate(5000, search_count)},
-                    {"name": "getItem", "rates": _rate(5000, item_count)},
+                    {"name": "buy.browse", "rates": _rate(5000, count)},
+                    {"name": "buy.browse.item.bulk", "rates": _rate(5000, bulk_count)},
                 ],
             }
         ]
@@ -44,45 +47,51 @@ def _run_with_transport(client: EbayClient, handler) -> tuple:
     return asyncio.run(run())
 
 
-def test_parser_accepts_documented_method_names():
+def test_parser_accepts_production_shared_browse_resource_names():
+    browse, bulk = EbayClient._quotas_from_payload(_quota_payload(count=3054, bulk_count=10))
+
+    assert browse.remaining == 1946
+    assert browse.resource == "buy.browse"
+    assert bulk.remaining == 4990
+    assert bulk.resource == "buy.browse.item.bulk"
+
+
+def test_bulk_quota_is_never_selected_as_the_normal_browse_pool():
+    payload = {
+        "rateLimits": [
+            {
+                "apiContext": "buy",
+                "apiName": "Browse",
+                "resources": [
+                    {"name": "buy.browse.item.bulk", "rates": _rate(5000, 2)},
+                ],
+            }
+        ]
+    }
+
+    browse, bulk = EbayClient._quotas_from_payload(payload)
+    assert browse.remaining is None
+    assert bulk.remaining == 4998
+
+
+def test_parser_remains_compatible_with_legacy_search_resource_name():
     payload = {
         "rateLimits": [
             {
                 "apiContext": "buy",
                 "apiName": "browse",
                 "resources": [
-                    {"name": "search", "rates": _rate(5000, 3054)},
-                    {"name": "getItem", "rates": _rate(5000, 10)},
-                    {"name": "searchByImage", "rates": _rate(1000, 20)},
+                    {"name": "search", "rates": _rate(5000, 30)},
+                    {"name": "getItem", "rates": _rate(5000, 0)},
                 ],
             }
         ]
     }
 
-    search, item = EbayClient._quotas_from_payload(payload)
-    assert search.remaining == 1946
-    assert search.resource == "search"
-    assert item.remaining == 4990
-    assert item.resource == "getItem"
-
-
-def test_parser_remains_compatible_with_resource_style_names():
-    payload = {
-        "rateLimits": [
-            {
-                "apiContext": "buy",
-                "apiName": "browse",
-                "resources": [
-                    {"name": "item_summary", "rates": _rate(5000, 30)},
-                    {"name": "item", "rates": _rate(5000, 0)},
-                ],
-            }
-        ]
-    }
-
-    search, item = EbayClient._quotas_from_payload(payload)
-    assert search.remaining == 4970
-    assert item.remaining == 5000
+    browse, bulk = EbayClient._quotas_from_payload(payload)
+    assert browse.remaining == 4970
+    assert browse.resource == "search"
+    assert bulk.remaining is None
 
 
 def test_fetch_quotas_retries_without_filters_when_filtered_payload_is_empty():
@@ -95,13 +104,32 @@ def test_fetch_quotas_retries_without_filters_when_filtered_payload_is_empty():
         return httpx.Response(200, json=_quota_payload())
 
     client = EbayClient("id", "secret", {"max_retries": 1})
-    search, item = _run_with_transport(client, handler)
+    browse, bulk = _run_with_transport(client, handler)
 
     assert len(requests_seen) == 2
     assert "api_name=browse" in requests_seen[0]
     assert "api_name=" not in requests_seen[1]
-    assert search.remaining == 4970
-    assert item.remaining == 5000
+    assert browse.remaining == 4970
+    assert bulk.remaining == 5000
+
+
+def test_search_and_item_detail_calls_share_one_safety_budget():
+    async def run() -> None:
+        client = EbayClient("id", "secret", {})
+        client.configure_quota_safety(
+            QuotaInfo(remaining=3, resource="buy.browse"),
+            QuotaInfo(),
+            reserve=1,
+        )
+        await client._claim_api_call("primary_search")
+        await client._claim_api_call("shipping_detail")
+        with pytest.raises(EbayQuotaSafetyError, match="Browse API quota"):
+            await client._claim_api_call("fallback_search")
+        assert client.api_calls == 2
+        assert client.search_calls == 1
+        assert client.item_detail_calls == 1
+
+    asyncio.run(run())
 
 
 def test_http_204_is_reported_exactly_in_quota_diagnostics():
@@ -109,10 +137,10 @@ def test_http_204_is_reported_exactly_in_quota_diagnostics():
         return httpx.Response(204)
 
     client = EbayClient("id", "secret", {"max_retries": 1})
-    search, item = _run_with_transport(client, handler)
+    browse, bulk = _run_with_transport(client, handler)
 
-    assert search.remaining is None
-    assert item.remaining is None
+    assert browse.remaining is None
+    assert bulk.remaining is None
     assert client.quota_diagnostics == [
         "Quota diagnostic (filtered request): HTTP 204 No Content.",
         "Quota diagnostic (unfiltered request): HTTP 204 No Content.",
@@ -127,7 +155,7 @@ def test_successful_unrecognized_payload_lists_returned_api_resources():
                 "apiName": "browse",
                 "resources": [
                     {"name": "searchByImage", "rates": _rate(1000, 4)},
-                    {"name": "getItems", "rates": _rate(5000, 2)},
+                    {"name": "buy.browse.item.bulk", "rates": _rate(5000, 2)},
                 ],
             }
         ]
@@ -137,13 +165,14 @@ def test_successful_unrecognized_payload_lists_returned_api_resources():
         return httpx.Response(200, json=payload)
 
     client = EbayClient("id", "secret", {"max_retries": 1})
-    search, item = _run_with_transport(client, handler)
+    browse, bulk = _run_with_transport(client, handler)
 
-    assert search.remaining is None
-    assert item.remaining is None
+    assert browse.remaining is None
+    assert bulk.remaining == 4998
     diagnostic = "\n".join(client.quota_diagnostics)
     assert "HTTP 200" not in diagnostic
-    assert "buy/browse: searchByImage, getItems" in diagnostic
+    assert "buy/browse: searchByImage, buy.browse.item.bulk" in diagnostic
+    assert "shared Browse quota" in diagnostic
 
 
 def test_diagnostics_redact_credentials_and_authorization_values():
