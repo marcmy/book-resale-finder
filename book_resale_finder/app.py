@@ -42,16 +42,21 @@ def main() -> int:
         if not light_stylesheet or not dark_stylesheet or light_stylesheet == dark_stylesheet:
             raise RuntimeError("Theme smoke test failed: light and dark styles were not applied.")
 
-        # The normal Browse quota is shared by searches and getItem calls.
-        # The obsolete second quota card must remain hidden.
-        if window._stat_frames[window.item_quota_value].isVisible():
-            raise RuntimeError("Quota smoke test failed: obsolete item-detail quota card is visible.")
+        # The prominent scan area is intentionally fixed at four cards.
+        hidden_values = [window.item_calls_value, window.item_quota_value]
+        if any(window._stat_frames[value].isVisible() for value in hidden_values):
+            raise RuntimeError("Stat-card smoke test failed: shipping-only cards are visible.")
+
+        browse_frame = window._stat_frames[window.search_quota_value]
+        search_calls_frame = window._stat_frames[window.search_calls_value]
+        app.processEvents()
+        if browse_frame.geometry().y() != search_calls_frame.geometry().y():
+            raise RuntimeError("Stat-card smoke test failed: Browse quota is not in the four-card grid.")
 
         values = [
             window.processed_value,
             window.found_value,
             window.search_calls_value,
-            window.item_calls_value,
             window.search_quota_value,
         ]
         for index, value in enumerate(values, start=1):
