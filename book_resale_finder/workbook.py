@@ -10,7 +10,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .models import SearchResult
 
-_HEADERS = ["ASIN", "Title", "Best Price", "Condition", "Listing URL"]
+_HEADERS = ["ASIN", "TITLE", "LOWEST", "CONDITION", "LISTING"]
 _REQUESTED_WIDTH_INCHES = {
     "A": 1.5,
     "B": 5.0,
