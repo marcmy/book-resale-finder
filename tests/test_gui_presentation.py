@@ -34,6 +34,15 @@ def test_stat_cards_keep_labels_and_values_on_one_line():
     assert "QVBoxLayout" not in stat_source
 
 
+def test_main_window_uses_compact_supported_width():
+    build_source = inspect.getsource(MainWindow._build_ui)
+    assert "self.resize(760, 760)" in build_source
+    assert "self.setMinimumSize(700, 680)" in build_source
+    assert 'self.retry_toggle.setText("Retry unmatched ISBNs with a broader search (recommended)")' in build_source
+    assert 'self.shipping_toggle.setText("Include shipping when choosing the best price")' in build_source
+    assert 'self.output_format.setItemText(0, "CSV — best for existing formulas")' in build_source
+
+
 def test_scan_area_is_fixed_to_four_useful_cards():
     build_source = inspect.getsource(MainWindow._build_ui)
     assert "item_calls_frame.setVisible(False)" in build_source
