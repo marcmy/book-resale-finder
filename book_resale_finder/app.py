@@ -42,6 +42,29 @@ def main() -> int:
         if not light_stylesheet or not dark_stylesheet or light_stylesheet == dark_stylesheet:
             raise RuntimeError("Theme smoke test failed: light and dark styles were not applied.")
 
+        # Exercise the supported compact width in the real frozen application.
+        window.resize(700, 700)
+        app.processEvents()
+        if window.width() != 700 or window.minimumWidth() != 700:
+            raise RuntimeError("Compact-window smoke test failed: the 700-pixel width was not applied.")
+        compact_widgets = [
+            window.retry_toggle,
+            window.shipping_toggle,
+            window.output_format,
+            window.quota_reserve,
+            window.browse_button,
+            window.open_file_button,
+            window.open_folder_button,
+        ]
+        if any(
+            widget.width() <= 0
+            or widget.height() <= 0
+            or widget.visibleRegion().isEmpty()
+            or widget.sizeHint().width() > widget.width() + 1
+            for widget in compact_widgets
+        ):
+            raise RuntimeError("Compact-window smoke test failed: one or more controls are clipped.")
+
         # The prominent scan area is intentionally fixed at four cards.
         hidden_values = [window.item_calls_value, window.item_quota_value]
         if any(window._stat_frames[value].isVisible() for value in hidden_values):
