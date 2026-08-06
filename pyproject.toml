@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "book-resale-finder"
-version = "1.1.10"
+version = "1.1.11"
 description = "Desktop eBay price finder for book ASIN/ISBN lists."
 readme = "README.md"
 requires-python = ">=3.12"
