@@ -12,8 +12,8 @@ A desktop eBay price finder for Keepa-style book lists. It reads a CSV containin
 - XLSX remains available with requested column widths, currency formatting, and clickable ASIN/listing links. Both formats can be created in one scan.
 - The recommended search mode performs a structured ISBN search and retries unmatched ISBNs with a broader keyword search. The retry can be disabled to reproduce the original tool's one-search-per-book behavior.
 - The GUI estimates minimum and maximum API calls before a scan starts.
-- Search and item-detail calls and quotas are shown separately.
-- A configurable quota reserve stops the scan safely and writes partial results before the reported quota is exhausted.
+- Search and item-detail calls are counted separately for transparency, but both consume one shared daily eBay Browse quota.
+- A configurable quota reserve stops the scan safely and writes partial results before the shared Browse quota is exhausted.
 - Shipping already present in eBay search results is reused; item-detail calls are made only for candidates whose search result omitted shipping.
 - Light, dark, and automatic themes use the same visual language as Book Resale Calculator.
 - eBay credentials are stored through the operating-system keyring (Windows Credential Manager on Windows) and are not displayed on the main screen.
@@ -33,13 +33,15 @@ ISBN-10 values are converted to ISBN-13. Amazon product URLs and raw ten-charact
 
 ## Search behavior and API calls
 
-The broader retry is enabled by default because it recovered 1,253 additional matches in the reported 1,706-book scan. That run used 1,706 first searches plus 1,348 broader retries, for 3,054 search API calls.
+The broader retry is enabled by default because it recovered 1,253 additional matches in the reported 1,706-book scan. That run used 1,706 first searches plus 1,348 broader retries, for 3,054 Browse API calls.
 
 Disabling **Retry unmatched ISBNs with a broader search** restores the original tool's one-pass behavior and reduces calls, but can miss listings where a seller placed the ISBN in searchable text without filling eBay's structured ISBN field.
 
 Shipping is not a simple doubling of calls. It adds between zero and the configured candidate limit per matched identifier. Search-result shipping is reused without another call; only missing shipping values require item-detail requests.
 
-The app retrieves the search and item-detail quotas separately. If eBay's analytics response has not caught up yet, the app subtracts its own calls from the starting value and labels the result as locally adjusted.
+The Developer Analytics response identifies the normal shared quota as `buy.browse`. Searches and individual `getItem` shipping lookups both consume that pool. The separate `buy.browse.item.bulk` quota applies to the bulk `getItems` method, which this application does not call.
+
+The app displays one **Browse quota remaining** value and enforces the safety reserve against the combined total of search and item-detail calls. If eBay's analytics response has not caught up yet, the app subtracts its own exact call total from the starting value and labels the result as locally adjusted.
 
 ## Output formats
 
