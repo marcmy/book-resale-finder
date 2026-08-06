@@ -10,6 +10,7 @@ A desktop eBay price finder for Keepa-style book lists. It reads a CSV containin
 - CSV is the default output and contains plain values for compatibility with existing spreadsheet formulas.
 - When no usable listing is returned, the ASIN remains in column A and all result cells remain blank. No status phrases are inserted into CSV or XLSX cells.
 - XLSX remains available with requested column widths, currency formatting, and clickable ASIN/listing links. Both formats can be created in one scan.
+- The compact desktop layout defaults to 760 pixels wide and remains usable down to 700 pixels without hiding controls or scan statistics.
 - The recommended search mode performs a structured ISBN search and retries unmatched ISBNs with a broader keyword search. The retry can be disabled to reproduce the original tool's one-search-per-book behavior.
 - The GUI estimates minimum and maximum API calls before a scan starts.
 - Search and item-detail calls are counted separately for transparency, but both consume one shared daily eBay Browse quota.
