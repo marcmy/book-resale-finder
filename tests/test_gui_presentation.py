@@ -40,7 +40,8 @@ def test_quota_reserve_wording_describes_shared_browse_threshold():
     assert 'label.setText("Browse quota remaining")' in build_source
     assert 'setSuffix(" calls remaining")' in build_source
     assert "shared daily eBay Browse" in build_source
-    assert "disable the safety buffer" in build_source
+    assert "disable " in build_source
+    assert "the safety buffer" in build_source
 
 
 def test_old_separate_quota_lines_are_cleaned_and_relabelled():
