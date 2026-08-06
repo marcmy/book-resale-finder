@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.13
+
+- Changed CSV and XLSX headers to the exact spreadsheet-compatible names `ASIN`, `TITLE`, `LOWEST`, `CONDITION`, and `LISTING`.
+- Reduced the default window width from 900 to 760 pixels and the supported minimum width from 800 to 700 pixels.
+- Shortened long option labels and output-format descriptions so the narrower layout does not clip controls.
+- Reduced outer margins while preserving the four-card dashboard and completion area.
+- Added unit and frozen-executable checks for the exact output headers and compact window layout.
+
 ## 1.1.12
 
 - Fixed the scan dashboard at four stable metrics: identifiers processed, matches found, search API calls, and Browse quota remaining.
