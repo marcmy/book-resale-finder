@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.12
+
+- Fixed the scan dashboard at four stable metrics: identifiers processed, matches found, search API calls, and Browse quota remaining.
+- Removed the shipping-only item-detail call counter from the prominent card grid.
+- Keep item-detail usage in the completion text only when shipping was enabled or an item-detail call actually occurred.
+- Moved the Browse quota card into the fourth grid position so the dashboard no longer leaves an empty slot.
+- Added unit and frozen-executable checks for the four-card layout.
+
 ## 1.1.11
 
 - Fixed quota parsing for eBay's production resource names: `buy.browse` and `buy.browse.item.bulk`.
