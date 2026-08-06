@@ -42,13 +42,17 @@ def main() -> int:
         if not light_stylesheet or not dark_stylesheet or light_stylesheet == dark_stylesheet:
             raise RuntimeError("Theme smoke test failed: light and dark styles were not applied.")
 
+        # The normal Browse quota is shared by searches and getItem calls.
+        # The obsolete second quota card must remain hidden.
+        if window._stat_frames[window.item_quota_value].isVisible():
+            raise RuntimeError("Quota smoke test failed: obsolete item-detail quota card is visible.")
+
         values = [
             window.processed_value,
             window.found_value,
             window.search_calls_value,
             window.item_calls_value,
             window.search_quota_value,
-            window.item_quota_value,
         ]
         for index, value in enumerate(values, start=1):
             value.setText(str(index * 100))

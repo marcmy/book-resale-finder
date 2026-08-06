@@ -73,10 +73,10 @@ async def run_scan(
         return bool(cancel_requested and cancel_requested())
 
     async with EbayClient(client_id, client_secret, config) as ebay:
-        starting_search_quota, starting_item_quota = await ebay.fetch_quotas()
+        starting_browse_quota, _starting_bulk_quota = await ebay.fetch_quotas()
         ebay.configure_quota_safety(
-            starting_search_quota,
-            starting_item_quota,
+            starting_browse_quota,
+            QuotaInfo(),
             max(0, int(quota_reserve)),
         )
 
@@ -153,11 +153,9 @@ async def run_scan(
         if is_cancelled():
             raise ScanCancelled()
 
-        ending_search_quota, ending_item_quota = await ebay.fetch_quotas()
+        ending_browse_quota, _ending_bulk_quota = await ebay.fetch_quotas()
         api_calls = ebay.api_calls
         api_call_breakdown = dict(ebay.api_call_breakdown)
-        search_calls = ebay.search_calls
-        item_detail_calls = ebay.item_detail_calls
         quota_diagnostics = list(getattr(ebay, "quota_diagnostics", []))
 
     skipped = 0
@@ -190,14 +188,15 @@ async def run_scan(
         write_results_xlsx(final_results, xlsx_file)
         output_files.append(xlsx_file)
 
-    search_quota = _reconcile_quota(starting_search_quota, ending_search_quota, search_calls)
-    item_quota = _reconcile_quota(starting_item_quota, ending_item_quota, item_detail_calls)
+    # Search and item-detail requests consume the same buy.browse pool, so
+    # reconcile the quota against every counted Browse request in this run.
+    browse_quota = _reconcile_quota(starting_browse_quota, ending_browse_quota, api_calls)
     no_match = sum(1 for result in final_results if result.condition == "No match")
     row_failures = sum(1 for result in final_results if result.condition == "Error")
     warnings: list[str] = []
-    if search_quota.estimated or item_quota.estimated:
-        warnings.append("eBay quota reporting had not caught up; remaining values were adjusted locally.")
-    if search_quota.remaining is None or (include_shipping and item_quota.remaining is None):
+    if browse_quota.estimated:
+        warnings.append("eBay quota reporting had not caught up; the remaining Browse quota was adjusted locally.")
+    if browse_quota.remaining is None:
         warnings.extend(message for message in quota_diagnostics if message not in warnings)
     if quota_stop:
         warnings.append(str(quota_stop))
@@ -214,8 +213,8 @@ async def run_scan(
         elapsed_seconds=time.monotonic() - started,
         output_file=output_files[0],
         output_files=output_files,
-        quota=search_quota,
-        item_quota=item_quota,
+        quota=browse_quota,
+        item_quota=QuotaInfo(resource="buy.browse.item.bulk"),
         stopped_for_quota=quota_stop is not None,
         stop_reason=str(quota_stop or ""),
         warnings=warnings,

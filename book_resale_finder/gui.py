@@ -1,4 +1,4 @@
-"""Book Resale Finder desktop interface with resilient stats and quota reporting."""
+"""Book Resale Finder desktop interface with shared Browse-quota reporting."""
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy
@@ -15,7 +15,7 @@ from .gui_v115 import CredentialsDialog, MainWindow as _MainWindow, ScanWorker
 
 
 class MainWindow(_MainWindow):
-    """Apply presentation and quota-reporting fixes to the main interface."""
+    """Apply presentation and shared Browse-quota fixes to the interface."""
 
     def _stat(self, label: str, tooltip: str) -> tuple[QFrame, QLabel]:
         # Keep each label and value on one line so every result remains visible
@@ -55,32 +55,75 @@ class MainWindow(_MainWindow):
         for label in self.findChildren(QLabel):
             if label.text() == "Keep unused quota":
                 label.setText("Stop with at least")
-                break
+            elif label.text() == "Search quota remaining":
+                label.setText("Browse quota remaining")
+
+        self.shipping_toggle.setText(
+            "Include shipping when choosing the best price (may use additional Browse API calls)"
+        )
+        self.shipping_toggle.setToolTip(
+            "Shipping already returned in search results is reused without another call. "
+            "When it is missing, the app can make item-detail calls. Search and item-detail "
+            "calls both consume the same daily eBay Browse quota."
+        )
 
         self.quota_reserve.setSuffix(" calls remaining")
         self.quota_reserve.setToolTip(
-            "The scan stops and saves partial results before either daily quota "
-            "would fall below this number of remaining calls. Set it to 0 to "
-            "disable the safety buffer."
+            "The scan stops and saves partial results before the shared daily eBay Browse "
+            "quota would fall below this number of remaining calls. Set it to 0 to disable "
+            "the safety buffer."
         )
 
-    def _set_quota_cards_visible(self, search_visible: bool, item_visible: bool) -> None:
-        self._stat_frames[self.search_quota_value].setVisible(search_visible)
-        self._stat_frames[self.item_quota_value].setVisible(item_visible)
+        self._stat_frames[self.search_quota_value].setToolTip(
+            "Remaining calls in eBay's shared buy.browse daily quota. Searches and item-detail "
+            "shipping lookups both consume this quota."
+        )
+        # buy.browse.item.bulk is a separate quota for getItems, which this app
+        # does not use. Do not present it as an item-detail quota.
+        self._stat_frames[self.item_quota_value].setVisible(False)
+
+    def _refresh_estimate(self) -> None:
+        super()._refresh_estimate()
+        text = self.estimate_label.text()
+        marker = ". The scan keeps"
+        if marker in text and "shared Browse quota" not in text:
+            text = text.replace(
+                marker,
+                ". All listed calls consume one shared Browse quota. The scan keeps",
+                1,
+            )
+            self.estimate_label.setText(text)
+
+    def _set_quota_cards_visible(self, browse_visible: bool, item_visible: bool = False) -> None:
+        del item_visible
+        self._stat_frames[self.search_quota_value].setVisible(browse_visible)
+        self._stat_frames[self.item_quota_value].setVisible(False)
 
     def _start_scan(self) -> None:
-        # Show both quota cards while a new lookup is running. Each card is
-        # hidden after completion only when eBay supplied no value for it.
-        self._set_quota_cards_visible(True, True)
+        self._set_quota_cards_visible(True)
         super()._start_scan()
 
     @staticmethod
-    def _remove_unavailable_quota_lines(text: str) -> str:
-        hidden = {
-            "Daily search quota remaining: unavailable",
-            "Daily item-detail quota remaining: unavailable",
-        }
-        lines = [line for line in text.splitlines() if line.strip() not in hidden]
+    def _clean_quota_lines(text: str) -> str:
+        lines: list[str] = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped in {
+                "Daily search quota remaining: unavailable",
+                "Daily Browse quota remaining: unavailable",
+                "Daily item-detail quota remaining: unavailable",
+            }:
+                continue
+            if stripped.startswith("Daily item-detail quota remaining:"):
+                continue
+            if stripped.startswith("Item-detail quota reset:"):
+                continue
+            line = line.replace(
+                "Daily search quota remaining:",
+                "Daily Browse quota remaining:",
+            ).replace("Search quota reset:", "Browse quota reset:")
+            lines.append(line)
+
         compact: list[str] = []
         for line in lines:
             if line or not compact or compact[-1]:
@@ -89,32 +132,18 @@ class MainWindow(_MainWindow):
 
     def _quota_safety_warnings(self, summary: RunSummary) -> list[str]:
         reserve = self.quota_reserve.value()
-        if reserve <= 0:
+        if reserve <= 0 or summary.quota.remaining is not None:
             return []
-
-        warnings: list[str] = []
-        if summary.quota.remaining is None:
-            warnings.append(
-                f"eBay did not provide search-quota data, so the {reserve:,}-call safety buffer could not be enforced."
-            )
-        if self.shipping_toggle.isChecked() and summary.item_quota.remaining is None:
-            warnings.append(
-                f"eBay did not provide item-detail quota data, so the {reserve:,}-call shipping safety buffer could not be enforced."
-            )
-        return warnings
+        return [
+            f"eBay did not provide shared Browse-quota data, so the {reserve:,}-call safety buffer could not be enforced."
+        ]
 
     def _on_completed(self, summary: RunSummary) -> None:
         super()._on_completed(summary)
 
-        # A quota card must remain a quota card. If eBay supplies no quota
-        # value, hide that card rather than relabeling it with an unrelated
-        # scan statistic.
-        self._set_quota_cards_visible(
-            summary.quota.remaining is not None,
-            summary.item_quota.remaining is not None,
-        )
+        self._set_quota_cards_visible(summary.quota.remaining is not None)
 
-        cleaned = self._remove_unavailable_quota_lines(self.summary_box.toPlainText())
+        cleaned = self._clean_quota_lines(self.summary_box.toPlainText())
         warnings = self._quota_safety_warnings(summary)
         if warnings:
             lines = cleaned.splitlines()

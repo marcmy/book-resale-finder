@@ -6,15 +6,26 @@ from typing import Any
 
 from .constants import RATE_LIMIT_URL
 from .ebay import EbayClient as _BaseEbayClient
+from .ebay import EbayQuotaSafetyError
 from .models import QuotaInfo
 
 
+class SharedBrowseQuotaSafetyError(EbayQuotaSafetyError):
+    def __init__(self) -> None:
+        self.category = "browse"
+        RuntimeError.__init__(
+            self,
+            "Stopped before the reserved eBay Browse API quota would be used.",
+        )
+
+
 class EbayClient(_BaseEbayClient):
-    """Quota-reporting compatibility and diagnostics for eBay Analytics."""
+    """Shared Browse-quota parsing, enforcement, and diagnostics."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.quota_diagnostics: list[str] = []
+        self._browse_call_budget: int | None = None
 
     @staticmethod
     def _normalized_method_name(raw_name: object) -> str:
@@ -24,22 +35,33 @@ class EbayClient(_BaseEbayClient):
 
     @classmethod
     def _quotas_from_payload(cls, payload: dict[str, Any]) -> tuple[QuotaInfo, QuotaInfo]:
-        search_resource: dict[str, Any] | None = None
-        item_resource: dict[str, Any] | None = None
-        search_name = "search"
-        item_name = "getItem"
-        search_score = item_score = -1
+        """Return the shared Browse quota and the unused bulk-getItems quota.
 
-        search_priorities = {
+        Production Analytics responses identify the normal Browse pool as
+        ``buy.browse``. All Browse methods used by this application—search and
+        getItem—consume that same pool. ``buy.browse.item.bulk`` is the
+        separate getItems quota and is intentionally not used for safety.
+        """
+        browse_resource: dict[str, Any] | None = None
+        bulk_resource: dict[str, Any] | None = None
+        browse_name = "buy.browse"
+        bulk_name = "buy.browse.item.bulk"
+        browse_score = bulk_score = -1
+
+        browse_priorities = {
+            "buy_browse": 200,
+            "browse": 190,
+            # Compatibility with older/documentation-style payloads.
             "search": 100,
             "item_summary_search": 90,
             "itemsummary_search": 90,
             "item_summary": 80,
         }
-        item_priorities = {
-            "get_item": 100,
-            "getitem": 100,
-            "item": 80,
+        bulk_priorities = {
+            "buy_browse_item_bulk": 200,
+            "browse_item_bulk": 190,
+            "get_items": 100,
+            "getitems": 100,
         }
 
         for group in payload.get("rateLimits") or []:
@@ -51,49 +73,81 @@ class EbayClient(_BaseEbayClient):
                 continue
 
             for resource in group.get("resources") or []:
+                if not isinstance(resource, dict):
+                    continue
                 raw_name = str(resource.get("name") or "")
                 normalized = cls._normalized_method_name(raw_name)
 
-                candidate_search_score = search_priorities.get(normalized, -1)
+                candidate_bulk_score = bulk_priorities.get(normalized, -1)
+                if candidate_bulk_score > bulk_score:
+                    bulk_resource = resource
+                    bulk_name = raw_name or bulk_name
+                    bulk_score = candidate_bulk_score
+
+                candidate_browse_score = browse_priorities.get(normalized, -1)
                 if (
-                    candidate_search_score < 0
+                    candidate_browse_score < 0
                     and normalized.startswith("search")
                     and "image" not in normalized
                 ):
-                    candidate_search_score = 70
-                if candidate_search_score > search_score:
-                    search_resource = resource
-                    search_name = raw_name or "search"
-                    search_score = candidate_search_score
+                    candidate_browse_score = 70
+                if "bulk" in normalized:
+                    candidate_browse_score = -1
+                if candidate_browse_score > browse_score:
+                    browse_resource = resource
+                    browse_name = raw_name or browse_name
+                    browse_score = candidate_browse_score
 
-                candidate_item_score = item_priorities.get(normalized, -1)
-                if candidate_item_score > item_score:
-                    item_resource = resource
-                    item_name = raw_name or "getItem"
-                    item_score = candidate_item_score
-
-        search = (
-            cls._quota_for_resource(search_resource, search_name)
-            if search_resource is not None and search_score >= 0
-            else QuotaInfo(resource="search")
+        browse = (
+            cls._quota_for_resource(browse_resource, browse_name)
+            if browse_resource is not None and browse_score >= 0
+            else QuotaInfo(resource="buy.browse")
         )
-        item = (
-            cls._quota_for_resource(item_resource, item_name)
-            if item_resource is not None and item_score >= 0
-            else QuotaInfo(resource="getItem")
+        bulk = (
+            cls._quota_for_resource(bulk_resource, bulk_name)
+            if bulk_resource is not None and bulk_score >= 0
+            else QuotaInfo(resource="buy.browse.item.bulk")
         )
-        return search, item
+        return browse, bulk
 
     @classmethod
     def _quota_from_payload(cls, payload: dict[str, Any]) -> QuotaInfo:
         return cls._quotas_from_payload(payload)[0]
+
+    def configure_quota_safety(
+        self,
+        search_quota: QuotaInfo,
+        item_quota: QuotaInfo,
+        reserve: int,
+    ) -> None:
+        del item_quota
+        reserve = max(0, int(reserve))
+        self._browse_call_budget = (
+            max(0, search_quota.remaining - reserve)
+            if search_quota.remaining is not None
+            else None
+        )
+
+    async def _claim_api_call(self, call_kind: str) -> None:
+        # Search and getItem calls consume the same buy.browse daily pool.
+        async with self._call_lock:
+            if self._browse_call_budget is not None and self.api_calls >= self._browse_call_budget:
+                raise SharedBrowseQuotaSafetyError()
+            self.api_calls += 1
+            self.api_call_breakdown[call_kind] += 1
+            if self.on_api_call:
+                self.on_api_call(self.api_calls)
 
     def _sanitize_diagnostic(self, text: object) -> str:
         cleaned = " ".join(str(text or "").split())
         for secret in (self.client_id, self.client_secret, self.token):
             if secret:
                 cleaned = cleaned.replace(str(secret), "[redacted]")
-        cleaned = re.sub(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+", "[redacted authorization]", cleaned)
+        cleaned = re.sub(
+            r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]+",
+            "[redacted authorization]",
+            cleaned,
+        )
         return cleaned[:600] or "No additional detail was returned."
 
     def _record_quota_diagnostic(self, message: str) -> None:
@@ -207,27 +261,27 @@ class EbayClient(_BaseEbayClient):
             label="filtered",
             params={"api_name": "browse", "api_context": "buy"},
         )
-        search, item = self._quotas_from_payload(filtered_payload)
-        if search.remaining is not None and item.remaining is not None:
-            return search, item
+        browse, bulk = self._quotas_from_payload(filtered_payload)
+        if browse.remaining is not None:
+            return browse, bulk
         if filtered_payload:
             self._record_quota_diagnostic(
-                "Quota diagnostic (filtered response): no usable Browse search/item quota was found. "
+                "Quota diagnostic (filtered response): no usable shared Browse quota was found. "
                 f"Returned entries: {self._payload_inventory(filtered_payload)}"
             )
 
         full_payload = await self._request_quota_payload(label="unfiltered", params=None)
-        full_search, full_item = self._quotas_from_payload(full_payload)
-        if search.remaining is None and full_search.remaining is not None:
-            search = full_search
-        if item.remaining is None and full_item.remaining is not None:
-            item = full_item
-        if full_payload and (search.remaining is None or item.remaining is None):
+        full_browse, full_bulk = self._quotas_from_payload(full_payload)
+        if browse.remaining is None and full_browse.remaining is not None:
+            browse = full_browse
+        if bulk.remaining is None and full_bulk.remaining is not None:
+            bulk = full_bulk
+        if full_payload and browse.remaining is None:
             self._record_quota_diagnostic(
-                "Quota diagnostic (unfiltered response): one or more Browse quotas were still missing. "
+                "Quota diagnostic (unfiltered response): the shared Browse quota was still missing. "
                 f"Returned entries: {self._payload_inventory(full_payload)}"
             )
-        return search, item
+        return browse, bulk
 
 
-__all__ = ["EbayClient"]
+__all__ = ["EbayClient", "SharedBrowseQuotaSafetyError"]
