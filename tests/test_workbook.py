@@ -13,6 +13,9 @@ from book_resale_finder.workbook import (
 )
 
 
+EXPECTED_HEADERS = ["ASIN", "TITLE", "LOWEST", "CONDITION", "LISTING"]
+
+
 def test_csv_output_is_plain_values(tmp_path: Path):
     output = tmp_path / "results.csv"
     write_results_csv(
@@ -29,7 +32,7 @@ def test_csv_output_is_plain_values(tmp_path: Path):
     )
     with output.open("r", encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.reader(handle))
-    assert rows[0] == ["ASIN", "Title", "Best Price", "Condition", "Listing URL"]
+    assert rows[0] == EXPECTED_HEADERS
     assert rows[1] == [
         "9780306406157",
         "A test book",
@@ -114,13 +117,7 @@ def test_workbook_headers_widths_and_links(tmp_path: Path):
     )
     workbook = load_workbook(output)
     sheet = workbook["Results"]
-    assert [sheet.cell(1, col).value for col in range(1, 6)] == [
-        "ASIN",
-        "Title",
-        "Best Price",
-        "Condition",
-        "Listing URL",
-    ]
+    assert [sheet.cell(1, col).value for col in range(1, 6)] == EXPECTED_HEADERS
     assert sheet.column_dimensions["A"].width == pytest.approx(inches_to_excel_width(1.5))
     assert sheet.column_dimensions["B"].width == pytest.approx(inches_to_excel_width(5.0))
     assert sheet.column_dimensions["E"].width == pytest.approx(inches_to_excel_width(8.0))
