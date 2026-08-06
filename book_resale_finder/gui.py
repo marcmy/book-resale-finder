@@ -1,7 +1,7 @@
 """Book Resale Finder desktop interface with shared Browse-quota reporting."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy
 
 from . import runner as _runner
 from .ebay_v118 import EbayClient as _QuotaAwareEbayClient
@@ -74,13 +74,36 @@ class MainWindow(_MainWindow):
             "the safety buffer."
         )
 
-        self._stat_frames[self.search_quota_value].setToolTip(
+        browse_frame = self._stat_frames[self.search_quota_value]
+        search_calls_frame = self._stat_frames[self.search_calls_value]
+        item_calls_frame = self._stat_frames[self.item_calls_value]
+        item_quota_frame = self._stat_frames[self.item_quota_value]
+
+        browse_frame.setToolTip(
             "Remaining calls in eBay's shared buy.browse daily quota. Searches and item-detail "
             "shipping lookups both consume this quota."
         )
-        # buy.browse.item.bulk is a separate quota for getItems, which this app
-        # does not use. Do not present it as an item-detail quota.
-        self._stat_frames[self.item_quota_value].setVisible(False)
+
+        # Keep the prominent scan area stable at four metrics: identifiers,
+        # matches, search calls, and shared Browse quota. Item-detail calls are
+        # a shipping-only diagnostic and belong in the completion text instead.
+        stats_layout = next(
+            (
+                layout
+                for layout in self.findChildren(QGridLayout)
+                if layout.indexOf(search_calls_frame) >= 0
+                and layout.indexOf(item_calls_frame) >= 0
+                and layout.indexOf(browse_frame) >= 0
+            ),
+            None,
+        )
+        item_calls_frame.setVisible(False)
+        item_quota_frame.setVisible(False)
+        if stats_layout is not None:
+            stats_layout.removeWidget(item_calls_frame)
+            stats_layout.removeWidget(item_quota_frame)
+            stats_layout.removeWidget(browse_frame)
+            stats_layout.addWidget(browse_frame, 1, 1)
 
     def _refresh_estimate(self) -> None:
         super()._refresh_estimate()
@@ -97,6 +120,7 @@ class MainWindow(_MainWindow):
     def _set_quota_cards_visible(self, browse_visible: bool, item_visible: bool = False) -> None:
         del item_visible
         self._stat_frames[self.search_quota_value].setVisible(browse_visible)
+        self._stat_frames[self.item_calls_value].setVisible(False)
         self._stat_frames[self.item_quota_value].setVisible(False)
 
     def _start_scan(self) -> None:
@@ -104,7 +128,7 @@ class MainWindow(_MainWindow):
         super()._start_scan()
 
     @staticmethod
-    def _clean_quota_lines(text: str) -> str:
+    def _clean_completion_lines(text: str, *, show_item_detail: bool) -> str:
         lines: list[str] = []
         for line in text.splitlines():
             stripped = line.strip()
@@ -117,6 +141,8 @@ class MainWindow(_MainWindow):
             if stripped.startswith("Daily item-detail quota remaining:"):
                 continue
             if stripped.startswith("Item-detail quota reset:"):
+                continue
+            if not show_item_detail and stripped.startswith("Item-detail API calls used:"):
                 continue
             line = line.replace(
                 "Daily search quota remaining:",
@@ -143,7 +169,12 @@ class MainWindow(_MainWindow):
 
         self._set_quota_cards_visible(summary.quota.remaining is not None)
 
-        cleaned = self._clean_quota_lines(self.summary_box.toPlainText())
+        item_detail_calls = summary.api_call_breakdown.get("shipping_detail", 0)
+        show_item_detail = self.shipping_toggle.isChecked() or item_detail_calls > 0
+        cleaned = self._clean_completion_lines(
+            self.summary_box.toPlainText(),
+            show_item_detail=show_item_detail,
+        )
         warnings = self._quota_safety_warnings(summary)
         if warnings:
             lines = cleaned.splitlines()

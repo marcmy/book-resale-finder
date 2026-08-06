@@ -23,7 +23,7 @@ def test_completion_output_keeps_results_without_repeating_tutorial():
     assert "How that total was calculated" not in base_completion_source
     assert "Matches found" in base_completion_source
     assert "Results saved to" in base_completion_source
-    assert "_clean_quota_lines" in wrapper_source
+    assert "_clean_completion_lines" in wrapper_source
 
 
 def test_stat_cards_keep_labels_and_values_on_one_line():
@@ -32,6 +32,18 @@ def test_stat_cards_keep_labels_and_values_on_one_line():
     assert "setMinimumWidth(90)" in stat_source
     assert "AlignRight" in stat_source
     assert "QVBoxLayout" not in stat_source
+
+
+def test_scan_area_is_fixed_to_four_useful_cards():
+    build_source = inspect.getsource(MainWindow._build_ui)
+    assert "item_calls_frame.setVisible(False)" in build_source
+    assert "item_quota_frame.setVisible(False)" in build_source
+    assert "stats_layout.removeWidget(item_calls_frame)" in build_source
+    assert "stats_layout.addWidget(browse_frame, 1, 1)" in build_source
+    assert "identifiers" in build_source.casefold()
+    assert "matches" in build_source.casefold()
+    assert "search calls" in build_source.casefold()
+    assert "shared Browse quota" in build_source
 
 
 def test_quota_reserve_wording_describes_shared_browse_threshold():
@@ -56,7 +68,7 @@ def test_old_separate_quota_lines_are_cleaned_and_relabelled():
             "Result saved to: results.csv",
         ]
     )
-    cleaned = MainWindow._clean_quota_lines(original)
+    cleaned = MainWindow._clean_completion_lines(original, show_item_detail=True)
     assert "Daily Browse quota remaining: 1,946 of 5,000" in cleaned
     assert "Browse quota reset: 08-06-2026 3:00 AM" in cleaned
     assert "item-detail quota remaining" not in cleaned.casefold()
@@ -74,9 +86,23 @@ def test_unavailable_shared_quota_line_is_removed():
             "Result saved to: results.csv",
         ]
     )
-    cleaned = MainWindow._clean_quota_lines(original)
+    cleaned = MainWindow._clean_completion_lines(original, show_item_detail=False)
     assert "unavailable" not in cleaned.casefold()
     assert "Processed: 20 of 20" in cleaned
+
+
+def test_item_detail_usage_is_shown_only_when_shipping_is_relevant():
+    original = "\n".join(
+        [
+            "Search API calls used: 30",
+            "Item-detail API calls used: 0",
+            "Elapsed time: 00:07",
+        ]
+    )
+    hidden = MainWindow._clean_completion_lines(original, show_item_detail=False)
+    shown = MainWindow._clean_completion_lines(original, show_item_detail=True)
+    assert "Item-detail API calls" not in hidden
+    assert "Item-detail API calls used: 0" in shown
 
 
 def test_only_shared_browse_quota_card_can_be_visible():
@@ -85,6 +111,7 @@ def test_only_shared_browse_quota_card_can_be_visible():
     assert "summary.quota.remaining is not None" in completion_source
     assert "summary.item_quota.remaining is not None" not in completion_source
     assert "setVisible(browse_visible)" in visibility_source
+    assert "self.item_calls_value].setVisible(False)" in visibility_source
     assert "self.item_quota_value].setVisible(False)" in visibility_source
 
 
