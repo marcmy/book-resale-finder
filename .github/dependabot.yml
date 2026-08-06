@@ -5,8 +5,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      day: "thursday"
+      time: "18:00"
       timezone: "America/New_York"
     open-pull-requests-limit: 10
     groups:
@@ -24,8 +24,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-      day: "monday"
-      time: "09:15"
+      day: "thursday"
+      time: "18:15"
       timezone: "America/New_York"
     open-pull-requests-limit: 5
     groups:
