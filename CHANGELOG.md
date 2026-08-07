@@ -5,6 +5,7 @@
 - Fixed the bottom of the interface being clipped when the window is vertically reduced to its supported minimum height.
 - Let the scrollable completion-details box shrink before the scan buttons and version footer can be pushed below the window.
 - Extended the frozen-executable compact-layout smoke test to the exact 700×680 minimum size and made it fail when controls extend outside the central widget.
+- Published the verified portable Windows v1.1.14 release package.
 
 ## 1.1.13
 
