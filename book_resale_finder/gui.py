@@ -61,6 +61,15 @@ class MainWindow(_MainWindow):
         if root_layout is not None:
             root_layout.setContentsMargins(18, 16, 18, 16)
 
+        # Completion details already live in a scrollable text box. Let that box
+        # yield vertical space first so shrinking the window never pushes the
+        # scan buttons or version footer below the central widget.
+        self.summary_box.setMinimumHeight(80)
+        self.summary_box.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+
         self.retry_toggle.setText("Retry unmatched ISBNs with a broader search (recommended)")
         self.shipping_toggle.setText("Include shipping when choosing the best price")
         self.output_format.setItemText(0, "CSV — best for existing formulas")
