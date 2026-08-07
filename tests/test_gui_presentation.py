@@ -43,6 +43,13 @@ def test_main_window_uses_compact_supported_width():
     assert 'self.output_format.setItemText(0, "CSV — best for existing formulas")' in build_source
 
 
+def test_completion_area_yields_space_before_bottom_controls_are_clipped():
+    build_source = inspect.getsource(MainWindow._build_ui)
+    assert "self.summary_box.setMinimumHeight(80)" in build_source
+    assert "self.summary_box.setSizePolicy" in build_source
+    assert "QSizePolicy.Policy.Expanding" in build_source
+
+
 def test_scan_area_is_fixed_to_four_useful_cards():
     build_source = inspect.getsource(MainWindow._build_ui)
     assert "item_calls_frame.setVisible(False)" in build_source
