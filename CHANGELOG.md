@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.14
+
+- Fixed the bottom of the interface being clipped when the window is vertically reduced to its supported minimum height.
+- Let the scrollable completion-details box shrink before the scan buttons and version footer can be pushed below the window.
+- Extended the frozen-executable compact-layout smoke test to the exact 700×680 minimum size and made it fail when controls extend outside the central widget.
+
 ## 1.1.13
 
 - Changed CSV and XLSX headers to the exact spreadsheet-compatible names `ASIN`, `TITLE`, `LOWEST`, `CONDITION`, and `LISTING`.
