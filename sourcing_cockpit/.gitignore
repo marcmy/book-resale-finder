@@ -1,1 +1,5 @@
 bridge/config.json
+build/
+dist/
+__pycache__/
+*.pyc
