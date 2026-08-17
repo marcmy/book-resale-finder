@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sourcing Cockpit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local-first Keepa/Amazon sourcing overlays: eligibility, gating, bookmarks, notes, history, cost files and more.",
   "permissions": [
     "storage"
@@ -62,6 +62,16 @@
       ],
       "css": [
         "content/styles.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
+      "js": [
+        "content/pair.js"
       ],
       "run_at": "document_idle"
     }
