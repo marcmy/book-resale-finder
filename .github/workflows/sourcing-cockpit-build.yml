@@ -71,7 +71,7 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Validate extension JavaScript
+      - name: Validate Chromium extension JavaScript
         shell: pwsh
         run: |
           Get-ChildItem sourcing_cockpit/extension -Recurse -Filter *.js | ForEach-Object {
@@ -79,22 +79,44 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $($_.FullName)" }
           }
 
+      - name: Stage Firefox Promise-API build
+        shell: pwsh
+        run: |
+          $source = Join-Path $PWD 'sourcing_cockpit/extension'
+          $firefox = Join-Path $PWD 'sourcing_cockpit/build/firefox-src'
+          Remove-Item $firefox -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item $firefox -ItemType Directory -Force | Out-Null
+          Copy-Item "$source/*" $firefox -Recurse -Force
+
+          # The maintained source uses Chrome's namespace so the same files run directly in
+          # Chromium MV3. Firefox exposes Promise-based APIs under browser.*, while its chrome.*
+          # compatibility namespace is callback-oriented. Build a Firefox-specific package by
+          # switching extension API calls to browser.* without changing application logic.
+          Get-ChildItem $firefox -Recurse -Filter *.js | ForEach-Object {
+            $text = Get-Content $_.FullName -Raw
+            $text = $text.Replace('chrome.', 'browser.')
+            Set-Content $_.FullName $text -Encoding utf8NoBOM
+            node --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Firefox JavaScript transform failed: $($_.FullName)" }
+          }
+
       - name: Lint and package Firefox extension
         id: firefox
         shell: pwsh
         run: |
+          $source = Join-Path $PWD 'sourcing_cockpit/build/firefox-src'
           $out = Join-Path $PWD 'sourcing_cockpit/build/firefox'
           New-Item $out -ItemType Directory -Force | Out-Null
 
-          npx --yes web-ext@10 lint --source-dir sourcing_cockpit/extension
+          npx --yes web-ext@10 lint --source-dir $source
           if ($LASTEXITCODE -ne 0) { throw 'web-ext lint failed.' }
 
-          npx --yes web-ext@10 build --source-dir sourcing_cockpit/extension --artifacts-dir $out --overwrite-dest
+          npx --yes web-ext@10 build --source-dir $source --artifacts-dir $out --overwrite-dest
           if ($LASTEXITCODE -ne 0) { throw 'web-ext build failed.' }
 
           if ($env:AMO_JWT_ISSUER -and $env:AMO_JWT_SECRET) {
             npx --yes web-ext@10 sign `
-              --source-dir sourcing_cockpit/extension `
+              --source-dir $source `
               --artifacts-dir $out `
               --channel unlisted `
               --approval-timeout 600000 `
@@ -107,7 +129,7 @@ jobs:
             Copy-Item $signed.FullName (Join-Path $out 'SourcingCockpit.xpi') -Force
             'signed=true' >> $env:GITHUB_OUTPUT
           } else {
-            Write-Host 'AMO signing secrets are not configured; producing an unsigned source package only.'
+            Write-Host 'AMO signing secrets are not configured; producing an unsigned Firefox package only.'
             'signed=false' >> $env:GITHUB_OUTPUT
           }
 
