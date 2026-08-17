@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: sourcing-cockpit-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
@@ -51,6 +55,15 @@ jobs:
           Pop-Location
           if (-not (Test-Path sourcing_cockpit/dist/SourcingCockpitHelper.exe)) {
             throw 'SourcingCockpitHelper.exe was not produced.'
+          }
+
+      - name: Smoke-test frozen helper
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD 'sourcing_cockpit/dist/SourcingCockpitHelper.exe'
+          $process = Start-Process -FilePath $exe -ArgumentList '--smoke-test' -PassThru -Wait
+          if ($process.ExitCode -ne 0) {
+            throw "Frozen Sourcing Cockpit helper exited with code $($process.ExitCode)."
           }
 
       - name: Set up Node.js
