@@ -1,0 +1,14 @@
+body { margin:0; background:#f5f6f8; color:#111; font:14px system-ui,sans-serif; }
+main { max-width:760px; margin:30px auto; padding:0 18px 60px; }
+h1 { font-size:26px; }
+h2 { font-size:17px; margin-top:0; }
+section { background:#fff; border:1px solid #ddd; border-radius:10px; padding:16px; margin:14px 0; }
+label { display:grid; grid-template-columns:180px 1fr; gap:10px; align-items:center; margin:9px 0; }
+label.check { display:block; }
+input, select, button { font:inherit; padding:7px 9px; border:1px solid #bbb; border-radius:6px; box-sizing:border-box; }
+input, select { width:100%; }
+.row { display:flex; gap:8px; align-items:center; margin-top:10px; }
+button { cursor:pointer; background:#fff; }
+button.primary { background:#222; color:#fff; }
+.hint { color:#666; font-size:12px; }
+#healthResult, #saved { color:#555; }

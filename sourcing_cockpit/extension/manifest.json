@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "Sourcing Cockpit",
+  "version": "0.1.0",
+  "description": "Local-first Keepa/Amazon sourcing overlays: eligibility, gating, bookmarks, notes, history, cost files and more.",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*",
+    "http://localhost:8765/*",
+    "https://keepa.com/*",
+    "https://*.keepa.com/*",
+    "https://www.amazon.com/*",
+    "https://www.amazon.co.uk/*",
+    "https://www.amazon.ca/*",
+    "https://api.github.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Sourcing Cockpit",
+    "default_popup": "popup/popup.html"
+  },
+  "options_page": "options/options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://keepa.com/*",
+        "https://*.keepa.com/*"
+      ],
+      "js": [
+        "lib/common.js",
+        "content/keepa.js"
+      ],
+      "css": [
+        "content/styles.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.amazon.com/*",
+        "https://www.amazon.co.uk/*",
+        "https://www.amazon.ca/*"
+      ],
+      "js": [
+        "lib/common.js",
+        "content/amazon.js"
+      ],
+      "css": [
+        "content/styles.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

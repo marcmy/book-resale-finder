@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Sourcing Cockpit Options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <h1>Sourcing Cockpit</h1>
+    <p>Amazon credentials live in the localhost bridge, not in this extension.</p>
+
+    <section>
+      <h2>Amazon / bridge</h2>
+      <label>Bridge URL <input id="bridgeUrl"></label>
+      <label>Marketplace
+        <select id="marketplaceId">
+          <option value="ATVPDKIKX0DER">US — ATVPDKIKX0DER</option>
+          <option value="A2EUQ1WTGCTBG2">CA — A2EUQ1WTGCTBG2</option>
+          <option value="A1F83G8C2ARO7P">UK — A1F83G8C2ARO7P</option>
+        </select>
+      </label>
+      <label>Condition
+        <select id="conditionType">
+          <option value="">Any</option>
+          <option value="new_new">New</option>
+          <option value="used_like_new">Used — Like New</option>
+          <option value="used_very_good">Used — Very Good</option>
+          <option value="used_good">Used — Good</option>
+          <option value="used_acceptable">Used — Acceptable</option>
+        </select>
+      </label>
+      <label>Eligibility cache TTL (hours) <input id="cacheTtlHours" type="number" min="1"></label>
+      <label class="check"><input id="autoScan" type="checkbox"> Auto-scan Keepa rows</label>
+      <div class="row">
+        <button id="health">Test bridge</button><span id="healthResult"></span>
+      </div>
+    </section>
+
+    <section>
+      <h2>GitHub Gist team sync (optional)</h2>
+      <label class="check"><input id="gistSyncEnabled" type="checkbox"> Enable Gist sync</label>
+      <label>Gist ID <input id="gistId" placeholder="blank = create on first push"></label>
+      <label>GitHub token <input id="gistToken" type="password" autocomplete="off"></label>
+      <p class="hint">Use the minimum token permission required for Gists. This token is stored locally by Chrome.</p>
+    </section>
+
+    <section>
+      <h2>Bulk cost file</h2>
+      <div class="row">
+        <input id="costFile" type="file" accept=".csv,text/csv">
+        <button id="exportCosts">Export costs CSV</button>
+      </div>
+      <p class="hint">CSV columns: ASIN,cost. Header names are case-insensitive.</p>
+    </section>
+
+    <div class="row">
+      <button id="save" class="primary">Save</button>
+      <span id="saved"></span>
+    </div>
+  </main>
+  <script src="../lib/common.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
