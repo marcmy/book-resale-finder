@@ -1,0 +1,125 @@
+name: Sourcing Cockpit Build
+
+on:
+  pull_request:
+    paths:
+      - "sourcing_cockpit/**"
+      - ".github/workflows/sourcing-cockpit-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+      AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: sourcing_cockpit/requirements-helper.txt
+
+      - name: Install helper build dependencies
+        run: python -m pip install -r sourcing_cockpit/requirements-helper.txt
+
+      - name: Compile Python sources
+        run: |
+          python -m py_compile sourcing_cockpit/helper.py
+          python -m py_compile sourcing_cockpit/bridge/server.py
+
+      - name: Run bridge unit tests
+        shell: pwsh
+        run: |
+          Push-Location sourcing_cockpit/bridge
+          python -m unittest test_server.py
+          Pop-Location
+
+      - name: Build standalone helper
+        shell: pwsh
+        run: |
+          Push-Location sourcing_cockpit
+          python -m PyInstaller --noconfirm --clean SourcingCockpitHelper.spec
+          Pop-Location
+          if (-not (Test-Path sourcing_cockpit/dist/SourcingCockpitHelper.exe)) {
+            throw 'SourcingCockpitHelper.exe was not produced.'
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Validate extension JavaScript
+        shell: pwsh
+        run: |
+          Get-ChildItem sourcing_cockpit/extension -Recurse -Filter *.js | ForEach-Object {
+            node --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $($_.FullName)" }
+          }
+
+      - name: Lint and package Firefox extension
+        id: firefox
+        shell: pwsh
+        run: |
+          $out = Join-Path $PWD 'sourcing_cockpit/build/firefox'
+          New-Item $out -ItemType Directory -Force | Out-Null
+
+          npx --yes web-ext@10 lint --source-dir sourcing_cockpit/extension
+          if ($LASTEXITCODE -ne 0) { throw 'web-ext lint failed.' }
+
+          npx --yes web-ext@10 build --source-dir sourcing_cockpit/extension --artifacts-dir $out --overwrite-dest
+          if ($LASTEXITCODE -ne 0) { throw 'web-ext build failed.' }
+
+          if ($env:AMO_JWT_ISSUER -and $env:AMO_JWT_SECRET) {
+            npx --yes web-ext@10 sign `
+              --source-dir sourcing_cockpit/extension `
+              --artifacts-dir $out `
+              --channel unlisted `
+              --approval-timeout 600000 `
+              --api-key $env:AMO_JWT_ISSUER `
+              --api-secret $env:AMO_JWT_SECRET
+            if ($LASTEXITCODE -ne 0) { throw 'Mozilla signing failed.' }
+
+            $signed = Get-ChildItem $out -Filter *.xpi | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if (-not $signed) { throw 'Mozilla signing succeeded but no XPI was downloaded.' }
+            Copy-Item $signed.FullName (Join-Path $out 'SourcingCockpit.xpi') -Force
+            'signed=true' >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host 'AMO signing secrets are not configured; producing an unsigned source package only.'
+            'signed=false' >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $known = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path $known)) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw 'ISCC.exe not found.' }
+          & $iscc "/DMyAppVersion=0.2.0" "/DRepoRoot=$PWD" "sourcing_cockpit/installer/SourcingCockpit.iss"
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed.' }
+
+      - name: Upload Doug-ready build
+        uses: actions/upload-artifact@v7
+        with:
+          name: SourcingCockpit-Windows-Firefox
+          path: |
+            sourcing_cockpit/dist/installer/SourcingCockpit-Setup-0.2.0.exe
+            sourcing_cockpit/dist/SourcingCockpitHelper.exe
+            sourcing_cockpit/build/firefox/*
+          if-no-files-found: error
