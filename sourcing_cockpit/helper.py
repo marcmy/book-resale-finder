@@ -177,6 +177,7 @@ class HelperApp:
         self.server_thread: threading.Thread | None = None
         self.current_client: SpApiClient | None = None
         self.settings_window: tk.Toplevel | None = None
+        self.status_label: ttk.Label | None = None
         self.status = "Not configured"
         self._quitting = False
 
@@ -236,9 +237,8 @@ class HelperApp:
             self.tray.update_menu()
         except Exception:
             pass
-        if self.settings_window and self.settings_window.winfo_exists():
-            label = self.settings_window.nametowidget("statusLabel")
-            label.configure(text=status)
+        if self.status_label is not None and self.status_label.winfo_exists():
+            self.status_label.configure(text=status)
 
     def stop_server(self) -> None:
         server = self.httpd
@@ -362,9 +362,8 @@ class HelperApp:
 
         ttk.Separator(outer).grid(row=row, column=0, columnspan=3, sticky="ew", pady=(12, 10))
         row += 1
-        ttk.Label(outer, text=self.status, name="statusLabel").grid(
-            row=row, column=0, columnspan=3, sticky="w", pady=(0, 10)
-        )
+        self.status_label = ttk.Label(outer, text=self.status)
+        self.status_label.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 10))
         row += 1
 
         buttons = ttk.Frame(outer)
@@ -491,9 +490,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--configure", action="store_true")
     parser.add_argument("--background", action="store_true")
+    parser.add_argument("--smoke-test", action="store_true")
     args, _ = parser.parse_known_args()
 
     configure_logging()
+    if args.smoke_test:
+        logging.info("%s %s smoke test passed imports", APP_NAME, APP_VERSION)
+        return 0
+
     instance = acquire_single_instance()
     if instance is None:
         # If another copy is already listening, quietly succeed on startup.
