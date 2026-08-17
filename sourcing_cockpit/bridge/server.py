@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import os
+import secrets
 import threading
 import time
 import urllib.error
@@ -32,6 +33,26 @@ EXTENSION_ORIGIN_PREFIXES = (
     "moz-extension://",
     "edge-extension://",
 )
+PAIR_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sourcing Cockpit pairing</title>
+<style>
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;max-width:620px;margin:12vh auto;padding:0 24px;color:#202124}
+.card{border:1px solid #d9dce1;border-radius:12px;padding:24px;box-shadow:0 4px 18px rgba(0,0,0,.08)}
+h1{font-size:22px;margin-top:0}p{line-height:1.5}.muted{color:#666}
+</style>
+</head>
+<body>
+<div class="card" id="sc-pair-card">
+<h1>Sourcing Cockpit</h1>
+<p id="sc-pair-status">Waiting for the Sourcing Cockpit browser extension to complete pairing…</p>
+<p class="muted">If this message does not change, make sure the signed extension is installed and then use <b>Pair browser</b> from the Sourcing Cockpit tray app.</p>
+</div>
+</body>
+</html>"""
 
 
 def endpoint_for_marketplaces(marketplace_ids: list[str]) -> str:
@@ -65,7 +86,7 @@ class Config:
     seller_id: str
     marketplace_id: str
     region: str = "NA"
-    user_agent: str = "SourcingCockpit/0.2.0 (Language=Python/3.12)"
+    user_agent: str = "SourcingCockpit/0.2.1 (Language=Python/3.12)"
 
     @property
     def endpoint(self) -> str:
@@ -326,7 +347,7 @@ def classify_restrictions(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SourcingCockpitBridge/0.2.0"
+    server_version = "SourcingCockpitBridge/0.2.1"
     sys_version = ""
 
     @property
@@ -346,12 +367,31 @@ class Handler(BaseHTTPRequestHandler):
             return True
         return origin.startswith(EXTENSION_ORIGIN_PREFIXES)
 
+    def _token_allowed(self) -> bool:
+        expected = str(getattr(self.server, "bridge_token", "") or "")
+        if not expected:
+            # Direct developer mode may run without helper-managed pairing.
+            return True
+        provided = (self.headers.get("X-Sourcing-Cockpit-Token") or "").strip()
+        return bool(provided) and secrets.compare_digest(provided, expected)
+
     def _send(self, status: int, payload: Any) -> None:
         raw = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _send_html(self, status: int, html: str) -> None:
+        raw = html.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
@@ -383,6 +423,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/pair":
+            self._send_html(200, PAIR_PAGE)
+            return
         if parsed.path == "/health":
             masked = self.config.seller_id
             if len(masked) > 6:
@@ -392,10 +435,11 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "ok": True,
                     "service": "SourcingCockpitBridge",
-                    "version": "0.2.0",
+                    "version": "0.2.1",
                     "region": self.config.region,
                     "marketplaceId": self.config.marketplace_id,
                     "sellerIdMasked": masked,
+                    "pairingRequired": bool(getattr(self.server, "bridge_token", "")),
                     "pid": os.getpid(),
                 },
             )
@@ -410,6 +454,12 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         try:
             body = self._read_json()
+            if parsed.path == "/pair":
+                self._pair(body)
+                return
+            if not self._token_allowed():
+                self._send(401, {"ok": False, "error": "Browser extension is not paired with this helper"})
+                return
             if parsed.path == "/eligibility":
                 self._eligibility(body)
             elif parsed.path == "/fees":
@@ -429,6 +479,28 @@ class Handler(BaseHTTPRequestHandler):
             )
         except Exception as exc:
             self._send(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+
+    def _pair(self, body: dict[str, Any]) -> None:
+        code = str(body.get("code") or "").strip()
+        expected = str(getattr(self.server, "pairing_code", "") or "")
+        expires_at = float(getattr(self.server, "pairing_expires_at", 0.0) or 0.0)
+        if not code or not expected or time.time() > expires_at:
+            raise ValueError("Pairing window expired. Start pairing again from the Sourcing Cockpit tray app.")
+        if not secrets.compare_digest(code, expected):
+            raise ValueError("Invalid pairing code")
+
+        token = str(getattr(self.server, "bridge_token", "") or "")
+        if not token:
+            raise ValueError("Helper bridge token is unavailable")
+        self.server.pairing_code = None  # type: ignore[attr-defined]
+        self.server.pairing_expires_at = 0.0  # type: ignore[attr-defined]
+        callback = getattr(self.server, "pairing_callback", None)
+        if callable(callback):
+            try:
+                callback()
+            except Exception:
+                pass
+        self._send(200, {"ok": True, "token": token})
 
     def _eligibility(self, body: dict[str, Any]) -> None:
         raw_asins = body.get("asins")
@@ -518,6 +590,12 @@ def main() -> int:
     client = SpApiClient(config)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     server.spapi_client = client  # type: ignore[attr-defined]
+    # Direct bridge development stays backwards-compatible. The packaged helper
+    # sets bridge_token and a time-limited pairing code at runtime.
+    server.bridge_token = os.environ.get("SOURCING_COCKPIT_BRIDGE_TOKEN", "")  # type: ignore[attr-defined]
+    server.pairing_code = os.environ.get("SOURCING_COCKPIT_PAIRING_CODE") or None  # type: ignore[attr-defined]
+    server.pairing_expires_at = time.time() + 300 if server.pairing_code else 0.0  # type: ignore[attr-defined]
+    server.pairing_callback = None  # type: ignore[attr-defined]
 
     print(f"Sourcing Cockpit bridge listening on http://127.0.0.1:{args.port}")
     print(f"Region={config.region} marketplace={config.marketplace_id} seller={config.seller_id[:3]}…")
