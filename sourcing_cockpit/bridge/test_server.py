@@ -7,6 +7,10 @@ class ClassifyRestrictionsTests(unittest.TestCase):
     def test_empty_is_sellable(self):
         self.assertEqual(classify_restrictions({"restrictions": []})["status"], "SELLABLE")
 
+    def test_nonempty_without_reasons_is_not_sellable(self):
+        result = classify_restrictions({"restrictions": [{}]})
+        self.assertEqual(result["status"], "RESTRICTED")
+
     def test_approval_required(self):
         result = classify_restrictions({
             "restrictions": [{
