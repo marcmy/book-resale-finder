@@ -1,5 +1,6 @@
 const DEFAULTS = {
   bridgeUrl: "http://127.0.0.1:8765",
+  bridgeToken: "",
   marketplaceId: "ATVPDKIKX0DER",
   conditionType: "used_good",
   cacheTtlHours: 168,
@@ -67,6 +68,33 @@ function cacheKey(asin, marketplaceId, conditionType) {
   return `${marketplaceId}|${conditionType || ""}|${asin}`;
 }
 
+function bridgeHeaders(settings, json = false) {
+  const headers = {};
+  if (json) headers["Content-Type"] = "application/json";
+  if (settings.bridgeToken) headers["X-Sourcing-Cockpit-Token"] = settings.bridgeToken;
+  return headers;
+}
+
+async function pairBridge(bridgeUrl, code) {
+  const cleanUrl = String(bridgeUrl || "").replace(/\/$/, "");
+  if (!/^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(cleanUrl)) {
+    throw new Error("Pairing page is not a local Sourcing Cockpit helper URL");
+  }
+  if (!code) throw new Error("Pairing code is missing");
+
+  const response = await fetch(`${cleanUrl}/pair`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok || !payload.token) {
+    throw new Error(payload.error || `Pairing failed with HTTP ${response.status}`);
+  }
+  await setSettings({ bridgeUrl: cleanUrl, bridgeToken: String(payload.token) });
+  return { bridgeUrl: cleanUrl };
+}
+
 async function checkEligibility(asin, force = false, marketplaceOverride = null) {
   const settings = await getSettings();
   const marketplaceId = marketplaceOverride || settings.marketplaceId;
@@ -83,9 +111,12 @@ async function checkEligibility(asin, force = false, marketplaceOverride = null)
   if (inflight.has(key)) return inflight.get(key);
 
   const promise = (async () => {
+    if (!settings.bridgeToken) {
+      throw new Error("Browser extension is not paired. Use Pair browser from the Sourcing Cockpit tray app.");
+    }
     const response = await fetch(`${settings.bridgeUrl.replace(/\/$/, "")}/eligibility`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: bridgeHeaders(settings, true),
       body: JSON.stringify({
         asins: [asin],
         marketplaceIds: [marketplaceId],
@@ -268,6 +299,9 @@ async function handleMessage(message) {
     case "SET_SETTINGS":
       return { ok: true, settings: await setSettings(message.patch || {}) };
 
+    case "PAIR_BRIDGE":
+      return { ok: true, ...(await pairBridge(message.bridgeUrl, message.code)) };
+
     case "CHECK_ELIGIBILITY":
       return {
         ok: true,
@@ -304,17 +338,27 @@ async function handleMessage(message) {
 
     case "BRIDGE_HEALTH": {
       const settings = await getSettings();
-      const response = await fetch(`${settings.bridgeUrl.replace(/\/$/, "")}/health`);
+      const response = await fetch(`${settings.bridgeUrl.replace(/\/$/, "")}/health`, {
+        headers: bridgeHeaders(settings)
+      });
       const payload = await response.json().catch(() => ({}));
-      return { ok: response.ok && payload.ok, health: payload, error: response.ok ? payload.error : `HTTP ${response.status}` };
+      return {
+        ok: response.ok && payload.ok,
+        health: payload,
+        paired: Boolean(settings.bridgeToken),
+        error: response.ok ? payload.error : `HTTP ${response.status}`
+      };
     }
 
     case "FEE_ESTIMATE": {
       const settings = await getSettings();
+      if (!settings.bridgeToken) {
+        throw new Error("Browser extension is not paired. Use Pair browser from the Sourcing Cockpit tray app.");
+      }
       const marketplaceId = message.marketplaceId || settings.marketplaceId;
       const response = await fetch(`${settings.bridgeUrl.replace(/\/$/, "")}/fees`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: bridgeHeaders(settings, true),
         body: JSON.stringify({
           asin: message.asin,
           marketplaceId,
