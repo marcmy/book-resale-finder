@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import threading
 import time
@@ -21,6 +22,16 @@ REGION_ENDPOINTS = {
     "EU": "https://sellingpartnerapi-eu.amazon.com",
     "FE": "https://sellingpartnerapi-fe.amazon.com",
 }
+MARKETPLACE_CURRENCIES = {
+    "ATVPDKIKX0DER": "USD",  # US
+    "A2EUQ1WTGCTBG2": "CAD",  # Canada
+    "A1F83G8C2ARO7P": "GBP",  # United Kingdom
+}
+EXTENSION_ORIGIN_PREFIXES = (
+    "chrome-extension://",
+    "moz-extension://",
+    "edge-extension://",
+)
 
 
 class ApiError(RuntimeError):
@@ -38,7 +49,7 @@ class Config:
     seller_id: str
     marketplace_id: str
     region: str = "NA"
-    user_agent: str = "SourcingCockpit/0.1.0 (Language=Python/3.12)"
+    user_agent: str = "SourcingCockpit/0.2.0 (Language=Python/3.12)"
 
     @property
     def endpoint(self) -> str:
@@ -55,20 +66,20 @@ class Config:
         if missing:
             raise ValueError(f"Missing required config keys: {', '.join(missing)}")
         return cls(
-            client_id=data["client_id"],
-            client_secret=data["client_secret"],
-            refresh_token=data["refresh_token"],
-            seller_id=data["seller_id"],
-            marketplace_id=data["marketplace_id"],
-            region=data.get("region", "NA"),
-            user_agent=data.get("user_agent", cls.user_agent),
+            client_id=str(data["client_id"]).strip(),
+            client_secret=str(data["client_secret"]).strip(),
+            refresh_token=str(data["refresh_token"]).strip(),
+            seller_id=str(data["seller_id"]).strip(),
+            marketplace_id=str(data["marketplace_id"]).strip(),
+            region=str(data.get("region", "NA")).strip().upper() or "NA",
+            user_agent=str(data.get("user_agent") or cls.user_agent),
         )
 
 
 class RateGate:
-    """Simple process-local request spacing for endpoints with per-second limits."""
+    """Process-local request spacing for endpoints with per-second limits."""
 
-    def __init__(self, min_interval_seconds: float = 0.21):
+    def __init__(self, min_interval_seconds: float):
         self._min_interval = min_interval_seconds
         self._next = 0.0
         self._lock = threading.Lock()
@@ -87,6 +98,8 @@ class SpApiClient:
         self._token: str | None = None
         self._token_expires_at = 0.0
         self._token_lock = threading.Lock()
+        # Amazon's documented defaults are 5 rps for Listings Restrictions and
+        # 1 rps for getMyFeesEstimateForASIN. Stay slightly below each limit.
         self._restrictions_gate = RateGate(0.21)
         self._fees_gate = RateGate(1.02)
 
@@ -104,17 +117,23 @@ class SpApiClient:
         data: bytes | None = None
 
         if form is not None:
-            data = urllib.parse.urlencode(form).encode()
+            data = urllib.parse.urlencode(form).encode("utf-8")
             req_headers["Content-Type"] = "application/x-www-form-urlencoded"
         elif body is not None:
-            data = json.dumps(body).encode()
+            data = json.dumps(body, allow_nan=False).encode("utf-8")
             req_headers["Content-Type"] = "application/json"
 
         request = urllib.request.Request(url, data=data, headers=req_headers, method=method)
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw = response.read()
-                payload = json.loads(raw.decode("utf-8")) if raw else {}
+                if not raw:
+                    payload: Any = {}
+                else:
+                    try:
+                        payload = json.loads(raw.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                        raise ApiError("Amazon returned an invalid JSON response") from exc
                 return payload, dict(response.headers.items())
         except urllib.error.HTTPError as exc:
             raw = exc.read()
@@ -142,18 +161,17 @@ class SpApiClient:
                     "client_secret": self.config.client_secret,
                 },
             )
-            token = payload.get("access_token")
+            token = payload.get("access_token") if isinstance(payload, dict) else None
             if not token:
                 raise ApiError("LWA response did not contain access_token", payload=payload)
             expires_in = int(payload.get("expires_in", 3600))
-            self._token = token
+            self._token = str(token)
             self._token_expires_at = time.time() + expires_in
-            return token
+            return self._token
 
     def _headers(self) -> dict[str, str]:
         return {
             "x-amz-access-token": self.access_token(),
-            "x-amz-date": time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()),
             "user-agent": self.config.user_agent,
             "accept": "application/json",
         }
@@ -165,18 +183,18 @@ class SpApiClient:
         condition_type: str | None = None,
     ) -> dict[str, Any]:
         self._restrictions_gate.wait()
+        marketplaces = marketplace_ids or [self.config.marketplace_id]
         params: list[tuple[str, str]] = [
             ("asin", asin),
             ("sellerId", self.config.seller_id),
-            ("marketplaceIds", ",".join(marketplace_ids or [self.config.marketplace_id])),
+            ("marketplaceIds", ",".join(marketplaces)),
         ]
         if condition_type:
             params.append(("conditionType", condition_type))
-        url = (
-            f"{self.config.endpoint}/listings/2021-08-01/restrictions?"
-            + urllib.parse.urlencode(params)
-        )
+        url = f"{self.config.endpoint}/listings/2021-08-01/restrictions?{urllib.parse.urlencode(params)}"
         payload, headers = self._json_request(url, headers=self._headers())
+        if not isinstance(payload, dict):
+            raise ApiError("Amazon returned an unexpected restrictions response")
         result = classify_restrictions(payload)
         result["rateLimit"] = headers.get("x-amzn-RateLimit-Limit")
         result["requestId"] = headers.get("x-amzn-RequestId")
@@ -192,34 +210,34 @@ class SpApiClient:
         is_amazon_fulfilled: bool = False,
     ) -> dict[str, Any]:
         self._fees_gate.wait()
+        currency = MARKETPLACE_CURRENCIES.get(marketplace_id)
+        if not currency:
+            raise ValueError(f"Fee estimates are not configured for marketplace {marketplace_id}")
+
         url = f"{self.config.endpoint}/products/fees/v0/items/{urllib.parse.quote(asin)}/feesEstimate"
         body = {
             "FeesEstimateRequest": {
                 "MarketplaceId": marketplace_id,
                 "IsAmazonFulfilled": bool(is_amazon_fulfilled),
                 "PriceToEstimateFees": {
-                    "ListingPrice": {"CurrencyCode": "USD", "Amount": float(price)},
-                    "Shipping": {"CurrencyCode": "USD", "Amount": float(shipping)},
+                    "ListingPrice": {"CurrencyCode": currency, "Amount": float(price)},
+                    "Shipping": {"CurrencyCode": currency, "Amount": float(shipping)},
                 },
-                "Identifier": f"sourcing-cockpit-{asin}-{int(time.time())}",
+                "Identifier": f"sourcing-cockpit-{asin}-{time.time_ns()}",
             }
         }
-        payload, headers = self._json_request(
-            url,
-            method="POST",
-            headers=self._headers(),
-            body=body,
-        )
+        payload, headers = self._json_request(url, method="POST", headers=self._headers(), body=body)
+        if not isinstance(payload, dict):
+            raise ApiError("Amazon returned an unexpected fee response")
         estimate = payload.get("payload", {}).get("FeesEstimateResult", {}).get("FeesEstimate", {})
         total = estimate.get("TotalFeesEstimate", {})
         details = estimate.get("FeeDetailList") or estimate.get("FeeDetails") or []
         return {
             "totalFees": {
                 "amount": total.get("Amount"),
-                "currency": total.get("CurrencyCode"),
+                "currency": total.get("CurrencyCode") or currency,
             },
             "details": details,
-            "raw": payload,
             "rateLimit": headers.get("x-amzn-RateLimit-Limit"),
             "requestId": headers.get("x-amzn-RequestId"),
         }
@@ -240,18 +258,23 @@ def classify_restrictions(payload: dict[str, Any]) -> dict[str, Any]:
     restrictions = payload.get("restrictions") or []
     reasons: list[dict[str, Any]] = []
     for restriction in restrictions:
-        reasons.extend(restriction.get("reasons") or [])
+        if isinstance(restriction, dict):
+            reasons.extend(x for x in (restriction.get("reasons") or []) if isinstance(x, dict))
 
-    reason_codes = sorted({
-        str(reason.get("reasonCode"))
-        for reason in reasons
-        if reason.get("reasonCode")
-    })
+    reason_codes = sorted(
+        {
+            str(reason.get("reasonCode"))
+            for reason in reasons
+            if reason.get("reasonCode")
+        }
+    )
     messages = [str(reason.get("message")) for reason in reasons if reason.get("message")]
 
     approval_url = None
     for reason in reasons:
         for link in reason.get("links") or []:
+            if not isinstance(link, dict):
+                continue
             resource = link.get("resource")
             if resource and str(resource).startswith("https://"):
                 approval_url = str(resource)
@@ -260,7 +283,10 @@ def classify_restrictions(payload: dict[str, Any]) -> dict[str, Any]:
         if approval_url and reason.get("reasonCode") == "APPROVAL_REQUIRED":
             break
 
-    if not restrictions or not reasons:
+    # An empty restrictions array is the only positive indication that there is
+    # no listing restriction. A malformed/non-empty restriction without reasons
+    # must never be painted green.
+    if not restrictions:
         status = "SELLABLE"
     elif "NOT_ELIGIBLE" in reason_codes:
         status = "RESTRICTED"
@@ -281,7 +307,8 @@ def classify_restrictions(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SourcingCockpitBridge/0.1.0"
+    server_version = "SourcingCockpitBridge/0.2.0"
+    sys_version = ""
 
     @property
     def client(self) -> SpApiClient:
@@ -292,50 +319,75 @@ class Handler(BaseHTTPRequestHandler):
         return self.server.spapi_client.config  # type: ignore[attr-defined]
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        print(f"[bridge] {self.address_string()} - {fmt % args}")
+        print(f"[bridge] {self.client_address[0]} - {fmt % args}")
 
-    def _cors(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    def _origin_allowed(self) -> bool:
+        origin = (self.headers.get("Origin") or "").strip().lower()
+        if not origin:
+            return True
+        return origin.startswith(EXTENSION_ORIGIN_PREFIXES)
 
     def _send(self, status: int, payload: Any) -> None:
-        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        raw = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
         self.send_response(status)
-        self._cors()
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
 
     def _read_json(self, max_bytes: int = 1_000_000) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0") or 0)
+        content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            raise ValueError("Content-Type must be application/json")
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError as exc:
+            raise ValueError("Invalid Content-Length") from exc
         if length <= 0 or length > max_bytes:
             raise ValueError("Invalid request body size")
-        return json.loads(self.rfile.read(length).decode("utf-8"))
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("JSON body must be an object")
+        return payload
 
     def do_OPTIONS(self) -> None:
-        self.send_response(204)
-        self._cors()
-        self.end_headers()
+        # Extension background pages have host permissions and do not need CORS.
+        # Refuse browser preflights so arbitrary websites cannot spend the user's
+        # Amazon API quota through this localhost service.
+        self._send(403, {"ok": False, "error": "Cross-origin web access is not allowed"})
 
     def do_GET(self) -> None:
+        if not self._origin_allowed():
+            self._send(403, {"ok": False, "error": "Origin not allowed"})
+            return
+
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/health":
             masked = self.config.seller_id
             if len(masked) > 6:
                 masked = f"{masked[:3]}…{masked[-3:]}"
-            self._send(200, {
-                "ok": True,
-                "region": self.config.region,
-                "marketplaceId": self.config.marketplace_id,
-                "sellerIdMasked": masked,
-                "pid": os.getpid(),
-            })
+            self._send(
+                200,
+                {
+                    "ok": True,
+                    "service": "SourcingCockpitBridge",
+                    "version": "0.2.0",
+                    "region": self.config.region,
+                    "marketplaceId": self.config.marketplace_id,
+                    "sellerIdMasked": masked,
+                    "pid": os.getpid(),
+                },
+            )
             return
         self._send(404, {"ok": False, "error": "Not found"})
 
     def do_POST(self) -> None:
+        if not self._origin_allowed():
+            self._send(403, {"ok": False, "error": "Origin not allowed"})
+            return
+
         parsed = urllib.parse.urlparse(self.path)
         try:
             body = self._read_json()
@@ -345,15 +397,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._fees(body)
             else:
                 self._send(404, {"ok": False, "error": "Not found"})
-        except ValueError as exc:
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
             self._send(400, {"ok": False, "error": str(exc)})
         except ApiError as exc:
-            self._send(exc.status or 502, {
-                "ok": False,
-                "error": str(exc),
-                "amazonStatus": exc.status,
-                "details": exc.payload,
-            })
+            self._send(
+                exc.status or 502,
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "amazonStatus": exc.status,
+                },
+            )
         except Exception as exc:
             self._send(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
 
@@ -361,23 +415,33 @@ class Handler(BaseHTTPRequestHandler):
         raw_asins = body.get("asins")
         if not isinstance(raw_asins, list) or not raw_asins:
             raise ValueError("asins must be a non-empty array")
-        asins = []
+
+        asins: list[str] = []
+        seen: set[str] = set()
         for value in raw_asins[:100]:
             asin = str(value).strip().upper()
             if not (len(asin) == 10 and asin.isalnum()):
                 raise ValueError(f"Invalid ASIN: {value!r}")
-            asins.append(asin)
+            if asin not in seen:
+                seen.add(asin)
+                asins.append(asin)
 
         marketplace_ids = body.get("marketplaceIds")
         if marketplace_ids is None:
             marketplace_ids = [self.config.marketplace_id]
-        if not isinstance(marketplace_ids, list) or not all(isinstance(x, str) and x for x in marketplace_ids):
-            raise ValueError("marketplaceIds must be an array of strings")
+        if (
+            not isinstance(marketplace_ids, list)
+            or not marketplace_ids
+            or len(marketplace_ids) > 10
+            or not all(isinstance(x, str) and x and len(x) <= 32 for x in marketplace_ids)
+        ):
+            raise ValueError("marketplaceIds must be a non-empty array of marketplace IDs")
 
         condition = body.get("conditionType") or None
-        results: dict[str, Any] = {}
+        if condition is not None and (not isinstance(condition, str) or len(condition) > 64):
+            raise ValueError("Invalid conditionType")
 
-        # Concurrency keeps browser batches responsive; RateGate still caps request pacing.
+        results: dict[str, Any] = {}
         with ThreadPoolExecutor(max_workers=min(4, len(asins))) as pool:
             futures = {
                 pool.submit(self.client.get_restrictions, asin, marketplace_ids, condition): asin
@@ -402,11 +466,18 @@ class Handler(BaseHTTPRequestHandler):
         asin = str(body.get("asin", "")).strip().upper()
         if not (len(asin) == 10 and asin.isalnum()):
             raise ValueError("Invalid asin")
-        marketplace_id = str(body.get("marketplaceId") or self.config.marketplace_id)
+
+        marketplace_id = str(body.get("marketplaceId") or self.config.marketplace_id).strip()
+        if marketplace_id not in MARKETPLACE_CURRENCIES:
+            raise ValueError("Unsupported marketplace for fee estimate")
+
         price = float(body.get("price"))
         shipping = float(body.get("shipping") or 0)
+        if not math.isfinite(price) or not math.isfinite(shipping):
+            raise ValueError("price and shipping must be finite numbers")
         if price <= 0 or shipping < 0:
             raise ValueError("price must be > 0 and shipping must be >= 0")
+
         result = self.client.fee_estimate(
             asin=asin,
             marketplace_id=marketplace_id,
