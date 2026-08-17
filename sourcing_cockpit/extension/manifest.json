@@ -4,8 +4,7 @@
   "version": "0.2.0",
   "description": "Local-first Keepa/Amazon sourcing overlays: eligibility, gating, bookmarks, notes, history, cost files and more.",
   "permissions": [
-    "storage",
-    "tabs"
+    "storage"
   ],
   "host_permissions": [
     "http://127.0.0.1:8765/*",
