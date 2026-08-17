@@ -32,6 +32,20 @@ jobs:
           cache: pip
           cache-dependency-path: sourcing_cockpit/requirements-helper.txt
 
+      - name: Read and validate application version
+        id: version
+        shell: pwsh
+        run: |
+          $match = Select-String -Path sourcing_cockpit/helper.py -Pattern '^APP_VERSION = "([^"]+)"$'
+          if (-not $match) { throw 'Could not read APP_VERSION from helper.py.' }
+          $version = $match.Matches[0].Groups[1].Value
+          $manifest = Get-Content sourcing_cockpit/extension/manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.version -ne $version) {
+            throw "Version mismatch: helper=$version extension=$($manifest.version)"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Sourcing Cockpit version: $version"
+
       - name: Install helper build dependencies
         run: python -m pip install -r sourcing_cockpit/requirements-helper.txt
 
@@ -106,6 +120,7 @@ jobs:
         run: |
           $source = Join-Path $PWD 'sourcing_cockpit/build/firefox-src'
           $out = Join-Path $PWD 'sourcing_cockpit/build/firefox'
+          Remove-Item $out -Recurse -Force -ErrorAction SilentlyContinue
           New-Item $out -ItemType Directory -Force | Out-Null
 
           npx --yes web-ext@10 lint --source-dir $source
@@ -119,7 +134,7 @@ jobs:
               --source-dir $source `
               --artifacts-dir $out `
               --channel unlisted `
-              --approval-timeout 600000 `
+              --approval-timeout 3600000 `
               --api-key $env:AMO_JWT_ISSUER `
               --api-secret $env:AMO_JWT_SECRET
             if ($LASTEXITCODE -ne 0) { throw 'Mozilla signing failed.' }
@@ -129,7 +144,7 @@ jobs:
             Copy-Item $signed.FullName (Join-Path $out 'SourcingCockpit.xpi') -Force
             'signed=true' >> $env:GITHUB_OUTPUT
           } else {
-            Write-Host 'AMO signing secrets are not configured; producing an unsigned Firefox package only.'
+            Write-Host 'AMO signing secrets are not configured; producing developer artifacts only.'
             'signed=false' >> $env:GITHUB_OUTPUT
           }
 
@@ -144,17 +159,41 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         run: |
+          $version = '${{ steps.version.outputs.version }}'
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe not found.' }
-          & $iscc "/DMyAppVersion=0.2.0" "/DRepoRoot=$PWD" "sourcing_cockpit/installer/SourcingCockpit.iss"
+          & $iscc "/DMyAppVersion=$version" "/DRepoRoot=$PWD" "sourcing_cockpit/installer/SourcingCockpit.iss"
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup build failed.' }
 
-      - name: Upload Doug-ready build
+      - name: Prepare end-user release package
+        if: steps.firefox.outputs.signed == 'true'
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $release = Join-Path $PWD 'sourcing_cockpit/dist/release'
+          Remove-Item $release -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item $release -ItemType Directory -Force | Out-Null
+          $installerName = "SourcingCockpit-Setup-$version.exe"
+          $installer = Join-Path $PWD "sourcing_cockpit/dist/installer/$installerName"
+          if (-not (Test-Path $installer)) { throw "Installer not found: $installer" }
+          Copy-Item $installer (Join-Path $release $installerName)
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $installerName" | Set-Content (Join-Path $release 'SHA256.txt') -Encoding ascii
+
+      - name: Upload end-user release
+        if: steps.firefox.outputs.signed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: SourcingCockpit-Windows-Firefox
+          name: SourcingCockpit-Windows-${{ steps.version.outputs.version }}
+          path: sourcing_cockpit/dist/release/*
+          if-no-files-found: error
+
+      - name: Upload developer artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: SourcingCockpit-Developer-${{ steps.version.outputs.version }}
           path: |
-            sourcing_cockpit/dist/installer/SourcingCockpit-Setup-0.2.0.exe
             sourcing_cockpit/dist/SourcingCockpitHelper.exe
+            sourcing_cockpit/dist/installer/SourcingCockpit-Setup-${{ steps.version.outputs.version }}.exe
             sourcing_cockpit/build/firefox/*
           if-no-files-found: error
