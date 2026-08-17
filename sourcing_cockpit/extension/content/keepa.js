@@ -10,7 +10,9 @@
     restricted: 0,
     errors: 0,
     pomodoroEnds: 0,
-    pomodoroTimer: null
+    pomodoroTimer: null,
+    scanRunning: false,
+    scanRequested: false
   };
 
   const settingsResponse = await chrome.runtime.sendMessage({ type: "GET_SETTINGS" });
@@ -43,6 +45,24 @@
     return [...out.entries()].filter(([row]) => row && !processed.has(row));
   }
 
+  function marketplaceFromKeepa(titleLink) {
+    if (titleLink?.href) {
+      try {
+        const host = new URL(titleLink.href, location.href).hostname.toLowerCase();
+        if (host.endsWith("amazon.com") || host.endsWith("amazon.ca") || host.endsWith("amazon.co.uk")) {
+          return SC.marketplaceFromHostname(host);
+        }
+      } catch (_) {}
+    }
+
+    const domainMatch = location.hash.match(/#!(?:product|search)\/(\d+)(?:[-/]|$)/i);
+    const keepaDomain = Number(domainMatch?.[1]);
+    if (keepaDomain === 2) return "A1F83G8C2ARO7P";
+    if (keepaDomain === 6) return "A2EUQ1WTGCTBG2";
+    if (keepaDomain === 1) return "ATVPDKIKX0DER";
+    return settings.marketplaceId || "ATVPDKIKX0DER";
+  }
+
   function getRowMeta(row, asin) {
     const text = (row.innerText || "").replace(/\s+/g, " ").trim();
     const links = [...row.querySelectorAll("a[href]")];
@@ -56,6 +76,8 @@
     const rank = SC.intAfterLabels(text, ["sales rank", "rank"]);
     const drops = SC.intAfterLabels(text, ["drops", "sales drops", "drop count"]);
     const price = SC.moneyFromText(text);
+    const marketplaceId = marketplaceFromKeepa(titleLink);
+    const marketplace = SC.marketplaceInfo(marketplaceId);
 
     return {
       asin,
@@ -66,7 +88,8 @@
       rank,
       drops,
       price,
-      url: titleLink?.href || `https://www.amazon.com/dp/${asin}`,
+      marketplaceId,
+      url: titleLink?.href || `https://${marketplace.amazonHost}/dp/${asin}`,
       text
     };
   }
@@ -152,7 +175,7 @@
     if (entered == null) return;
     const cost = Number(entered);
     if (!Number.isFinite(cost) || cost < 0) return alert("Enter a valid non-negative cost.");
-    costs[meta.asin] = { cost, updatedAt: Date.now(), title: meta.title || "" };
+    costs[meta.asin] = { cost, updatedAt: Date.now(), title: meta.title || "", marketplaceId: meta.marketplaceId };
     await chrome.runtime.sendMessage({ type: "SET_STATE", state: { costs } });
   }
 
@@ -207,20 +230,23 @@
 
     const similar = button("Similar", "Search Keepa using title keywords", () => {
       const q = SC.titleWords(meta.title).join(" ");
-      window.open(`https://keepa.com/#!search/1/${encodeURIComponent(q)}`, "_blank", "noopener");
+      const marketplace = SC.marketplaceInfo(meta.marketplaceId);
+      window.open(`https://keepa.com/#!search/${marketplace.keepaDomain}/${encodeURIComponent(q)}`, "_blank", "noopener");
     });
     mount.appendChild(similar);
 
     const rabbit = button("Rabbit", "Search Amazon using a narrower title/brand trail", () => {
       const words = SC.titleWords(`${meta.brand} ${meta.title}`).slice(0, 5).join(" ");
-      window.open(`https://www.amazon.com/s?k=${encodeURIComponent(words)}`, "_blank", "noopener");
+      const marketplace = SC.marketplaceInfo(meta.marketplaceId);
+      window.open(`https://${marketplace.amazonHost}/s?k=${encodeURIComponent(words)}`, "_blank", "noopener");
     });
     mount.appendChild(rabbit);
 
     try {
       const eligibility = await chrome.runtime.sendMessage({
         type: "CHECK_ELIGIBILITY",
-        asin
+        asin,
+        marketplaceId: meta.marketplaceId
       });
       if (!eligibility?.ok) throw new Error(eligibility?.error || "Eligibility failed");
 
@@ -274,12 +300,32 @@
   }
 
   async function scan() {
-    const rows = discoverRows();
-    for (const [row, asin] of rows) {
-      processRow(row, asin);
-      await new Promise(r => setTimeout(r, 35));
+    if (state.scanRunning) {
+      state.scanRequested = true;
+      return;
     }
-    updateToolbar();
+
+    state.scanRunning = true;
+    try {
+      do {
+        state.scanRequested = false;
+        const rows = discoverRows();
+        let nextIndex = 0;
+        const workerCount = Math.min(4, rows.length);
+        const workers = Array.from({ length: workerCount }, async () => {
+          while (true) {
+            const index = nextIndex++;
+            if (index >= rows.length) return;
+            const [row, asin] = rows[index];
+            await processRow(row, asin);
+          }
+        });
+        await Promise.all(workers);
+      } while (state.scanRequested);
+    } finally {
+      state.scanRunning = false;
+      updateToolbar();
+    }
   }
 
   function createToolbar() {
