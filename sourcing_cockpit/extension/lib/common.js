@@ -1,4 +1,17 @@
 (() => {
+  // Firefox exposes Promise-first WebExtension APIs as `browser.*` while
+  // Chromium uses `chrome.*`. The rest of the extension intentionally uses
+  // the Chromium spelling; on Firefox, point that spelling at `browser` so
+  // our async/await calls behave identically.
+  if (globalThis.browser) {
+    try {
+      globalThis.chrome = globalThis.browser;
+    } catch (_) {
+      // Extremely defensive fallback; current Firefox extension globals allow
+      // this assignment. If that ever changes, callers still get native chrome.*.
+    }
+  }
+
   const ASIN_RE = /\b(B[0-9A-Z]{9}|[0-9]{10})\b/i;
 
   function normalizeAsin(value) {
