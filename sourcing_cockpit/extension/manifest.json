@@ -18,7 +18,7 @@
     "https://api.github.com/*"
   ],
   "background": {
-    "scripts": ["background.js"],
+    "scripts": ["lib/common.js", "background.js"],
     "service_worker": "background.js"
   },
   "action": {
