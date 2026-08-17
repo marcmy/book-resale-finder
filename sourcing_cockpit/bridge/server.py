@@ -22,16 +22,32 @@ REGION_ENDPOINTS = {
     "EU": "https://sellingpartnerapi-eu.amazon.com",
     "FE": "https://sellingpartnerapi-fe.amazon.com",
 }
-MARKETPLACE_CURRENCIES = {
-    "ATVPDKIKX0DER": "USD",  # US
-    "A2EUQ1WTGCTBG2": "CAD",  # Canada
-    "A1F83G8C2ARO7P": "GBP",  # United Kingdom
+MARKETPLACE_INFO = {
+    "ATVPDKIKX0DER": {"region": "NA", "currency": "USD"},  # US
+    "A2EUQ1WTGCTBG2": {"region": "NA", "currency": "CAD"},  # Canada
+    "A1F83G8C2ARO7P": {"region": "EU", "currency": "GBP"},  # United Kingdom
 }
 EXTENSION_ORIGIN_PREFIXES = (
     "chrome-extension://",
     "moz-extension://",
     "edge-extension://",
 )
+
+
+def endpoint_for_marketplaces(marketplace_ids: list[str]) -> str:
+    if not marketplace_ids:
+        raise ValueError("At least one marketplace ID is required")
+
+    regions: set[str] = set()
+    for marketplace_id in marketplace_ids:
+        info = MARKETPLACE_INFO.get(marketplace_id)
+        if not info:
+            raise ValueError(f"Unsupported marketplace: {marketplace_id}")
+        regions.add(str(info["region"]))
+
+    if len(regions) != 1:
+        raise ValueError("A single SP-API request cannot mix marketplaces from different regions")
+    return REGION_ENDPOINTS[regions.pop()]
 
 
 class ApiError(RuntimeError):
@@ -184,6 +200,7 @@ class SpApiClient:
     ) -> dict[str, Any]:
         self._restrictions_gate.wait()
         marketplaces = marketplace_ids or [self.config.marketplace_id]
+        endpoint = endpoint_for_marketplaces(marketplaces)
         params: list[tuple[str, str]] = [
             ("asin", asin),
             ("sellerId", self.config.seller_id),
@@ -191,7 +208,7 @@ class SpApiClient:
         ]
         if condition_type:
             params.append(("conditionType", condition_type))
-        url = f"{self.config.endpoint}/listings/2021-08-01/restrictions?{urllib.parse.urlencode(params)}"
+        url = f"{endpoint}/listings/2021-08-01/restrictions?{urllib.parse.urlencode(params)}"
         payload, headers = self._json_request(url, headers=self._headers())
         if not isinstance(payload, dict):
             raise ApiError("Amazon returned an unexpected restrictions response")
@@ -210,11 +227,13 @@ class SpApiClient:
         is_amazon_fulfilled: bool = False,
     ) -> dict[str, Any]:
         self._fees_gate.wait()
-        currency = MARKETPLACE_CURRENCIES.get(marketplace_id)
-        if not currency:
+        info = MARKETPLACE_INFO.get(marketplace_id)
+        if not info:
             raise ValueError(f"Fee estimates are not configured for marketplace {marketplace_id}")
+        currency = str(info["currency"])
+        endpoint = endpoint_for_marketplaces([marketplace_id])
 
-        url = f"{self.config.endpoint}/products/fees/v0/items/{urllib.parse.quote(asin)}/feesEstimate"
+        url = f"{endpoint}/products/fees/v0/items/{urllib.parse.quote(asin)}/feesEstimate"
         body = {
             "FeesEstimateRequest": {
                 "MarketplaceId": marketplace_id,
@@ -433,9 +452,10 @@ class Handler(BaseHTTPRequestHandler):
             not isinstance(marketplace_ids, list)
             or not marketplace_ids
             or len(marketplace_ids) > 10
-            or not all(isinstance(x, str) and x and len(x) <= 32 for x in marketplace_ids)
+            or not all(isinstance(x, str) and x in MARKETPLACE_INFO for x in marketplace_ids)
         ):
-            raise ValueError("marketplaceIds must be a non-empty array of marketplace IDs")
+            raise ValueError("marketplaceIds must contain supported marketplace IDs")
+        endpoint_for_marketplaces(marketplace_ids)
 
         condition = body.get("conditionType") or None
         if condition is not None and (not isinstance(condition, str) or len(condition) > 64):
@@ -468,7 +488,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("Invalid asin")
 
         marketplace_id = str(body.get("marketplaceId") or self.config.marketplace_id).strip()
-        if marketplace_id not in MARKETPLACE_CURRENCIES:
+        if marketplace_id not in MARKETPLACE_INFO:
             raise ValueError("Unsupported marketplace for fee estimate")
 
         price = float(body.get("price"))
