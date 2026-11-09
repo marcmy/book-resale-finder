@@ -8,6 +8,8 @@ updates:
       time: "12:00"
       timezone: "America/New_York"
     open-pull-requests-limit: 100
+    cooldown:
+      default-days: 7
     groups:
       python-minor-and-patch:
         patterns:
@@ -26,6 +28,8 @@ updates:
       time: "12:00"
       timezone: "America/New_York"
     open-pull-requests-limit: 100
+    cooldown:
+      default-days: 7
     groups:
       github-actions:
         patterns:
